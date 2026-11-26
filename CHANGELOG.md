@@ -10,7 +10,7 @@ Domdly uses [Semantic Versioning](https://semver.org/) in the form `MAJOR.MINOR.
 - **MINOR** (`1.0.1` to `1.1.0`): new features that keep existing files, settings and shortcuts working.
 - **MAJOR** (`1.4.2` to `2.0.0`): changes that break something users rely on.
 
-Every change that reaches `main` is listed under *Unreleased* first. A release moves those entries under a new version heading, bumps the number in `src/version.h` (and the manifest and the release badge at the top of the README), and is tagged `vMAJOR.MINOR.PATCH`; the CI then publishes `Domdly.exe`, `md2html.exe` and the Debian package for that tag, with this file's section for that version as the release notes. Version `1.0.0` is the first public release.
+Every change that reaches `main` is listed under *Unreleased* first. A release moves those entries under a new version heading, bumps the number in `src/version.h` (and the manifest and the version in `docs/images/badge-release.svg`, the release badge of the README), and is tagged `vMAJOR.MINOR.PATCH`; the CI then publishes `Domdly.exe`, `md2html.exe` and the Debian package for that tag, with this file's section for that version as the release notes. Version `1.0.0` is the first public release.
 
 ## [Unreleased]
 
