@@ -14,6 +14,13 @@ Every change that reaches `main` is listed under *Unreleased* first. A release m
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-11-27
+
+### Fixed
+
+- Windows: with the whole document selected in the Read view (`Ctrl+A`), Delete, Backspace, Cut, Enter, typing and pasting did nothing, because the selection starts on a hidden block marker in front of the first block. Replacing everything now works as in a word processor: the document becomes empty, or holds only what was typed or pasted, and one `Ctrl+Z` brings the old text back.
+- Windows: selections in the Read view that start in front of the first block or a list bullet, or run past the end of the last block (for example with the mouse or `Shift+Ctrl+Home`/`End`), are narrowed to the text they cover, so they can be deleted and replaced too.
+
 ## [1.1.1] - 2026-11-27
 
 ### Fixed
@@ -72,7 +79,8 @@ First public version.
 - Separate build outputs: `build/windows/` (`build.bat`) and `build/linux/` (`build.sh`).
 - Repository cover image (`docs/images/cover.png`, 1280 x 640) drawn by `tools/mkcover.c`.
 
-[Unreleased]: https://github.com/dogukansahil/Domdly/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/dogukansahil/Domdly/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/dogukansahil/Domdly/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/dogukansahil/Domdly/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/dogukansahil/Domdly/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/dogukansahil/Domdly/releases/tag/v1.0.0

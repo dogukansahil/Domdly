@@ -2814,6 +2814,19 @@ static int edit_target(LONG *sa, LONG *sb, int *k2)
         set_sel(g_prev, cr.cpMin, cr.cpMax);
     }
     LONG a, b;
+    if (cr.cpMin != cr.cpMax) {
+        /* A selection made with the mouse or Shift+Ctrl+Home/End can start on a
+           hidden marker (or a bullet) and end in the closing paragraph of the
+           document; it is narrowed to the text of the blocks it covers. */
+        CHARRANGE was = cr;
+        if (k1 >= 0 && blk_range(k1, &a, &b) && cr.cpMin < a) cr.cpMin = a;
+        if (g_mcount > 0 && blk_range(g_mcount - 1, &a, &b) && cr.cpMax > b) {
+            cr.cpMax = b;
+            kb = g_mcount - 1;
+        }
+        if (cr.cpMax < cr.cpMin) cr.cpMax = cr.cpMin;
+        if (cr.cpMin != was.cpMin || cr.cpMax != was.cpMax) set_sel(g_prev, cr.cpMin, cr.cpMax);
+    }
     if (k1 < 0 || !g_blk[k1].editable || !blk_range(k1, &a, &b) || cr.cpMin < a || cr.cpMin > b) k1 = -1;
     if (kb < 0 || !g_blk[kb].editable || !blk_range(kb, &a, &b) || cr.cpMax < a || cr.cpMax > b) kb = -1;
     *sa = cr.cpMin;
@@ -3108,8 +3121,39 @@ static void op_pending_type(const char *utf8_md, int is_markdown)
     wys_render_at(line, caret);
 }
 
+/* Is the whole document selected (Ctrl+A, or a selection from the first block
+ * to the last)? */
+static int all_selected(void)
+{
+    if (g_mcount == 0 || g_raw_line >= 0) return 0;
+    CHARRANGE cr = get_sel(g_prev);
+    LONG fa, fb, la, lb;
+    if (cr.cpMin == cr.cpMax || !blk_range(0, &fa, &fb) || !blk_range(g_mcount - 1, &la, &lb)) return 0;
+    return cr.cpMin <= fa && cr.cpMax >= lb;
+}
+
+/* Replaces the whole document: with nothing (Delete, Backspace, Cut), or with
+ * what was typed or pasted. Whatever kind the blocks were, the result is an
+ * empty document in which typing starts, as in a word processor. One undo
+ * step in the source brings everything back. */
+static void op_replace_all(const char *md, int is_markdown)
+{
+    wys_flush();
+    splice_source(0, editor_line_count() - 1, "");
+    g_welcome_off = 1;
+    wys_render_at(0, 0);
+    CHARRANGE z = get_sel(g_prev);
+    g_pend = -2;
+    g_pend_cp = z.cpMin;
+    if (md && *md) op_pending_type(md, is_markdown);
+}
+
 static void wys_enter(void)
 {
+    if (all_selected()) {
+        op_replace_all("", 0);
+        return;
+    }
     LONG sa, sb;
     int k2, k = edit_target(&sa, &sb, &k2);
     if (g_pend != -1 && sa == sb && sa == g_pend_cp) return; /* one empty paragraph is enough */
@@ -3173,6 +3217,10 @@ static void wys_enter(void)
 /* Backspace / Delete. Returns 1 when handled here (or refused). */
 static int wys_delete(WPARAM key)
 {
+    if (all_selected()) {
+        op_replace_all("", 0);
+        return 1;
+    }
     LONG sa, sb;
     int k2, k = edit_target(&sa, &sb, &k2);
     if (g_pend != -1 && sa == sb && sa == g_pend_cp) {
@@ -3250,6 +3298,11 @@ static void wys_paste(void)
 {
     char *md = clipboard_utf8();
     if (!md) return;
+    if (all_selected()) {
+        op_replace_all(md, 1);
+        free(md);
+        return;
+    }
     LONG sa, sb;
     int k2, k = edit_target(&sa, &sb, &k2);
     if (g_pend != -1 && sa == sb && sa == g_pend_cp) {
@@ -3285,6 +3338,10 @@ static void wys_char(HWND h, UINT m, WPARAM w, LPARAM l)
     WCHAR wc[2] = {(WCHAR)w, 0};
     WideCharToMultiByte(CP_UTF8, 0, wc, 1, u, sizeof u - 1, NULL, NULL);
     u[w < 0x80 ? 1 : w < 0x800 ? 2 : 3] = 0;
+    if (all_selected()) {
+        op_replace_all(u, 0);
+        return;
+    }
     if (g_pend != -1 && sa == sb && sa == g_pend_cp) {
         op_pending_type(u, 0);
         return;
