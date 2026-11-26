@@ -39,6 +39,7 @@ void settings_load(app_settings *s)
     s->zoom = 100;
     s->split_permille = 500;
     s->tree_width = 240;
+    s->fmt_bar = 1;
 
     HKEY k;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, SETTINGS_KEY, 0, KEY_READ, &k) != ERROR_SUCCESS) {
@@ -63,6 +64,7 @@ void settings_load(app_settings *s)
     s->split_permille = clamp(get_dword(k, L"Split", s->split_permille), 150, 850);
     s->no_install_prompt = get_dword(k, L"NoInstallPrompt", 0) != 0;
     s->tree_open = get_dword(k, L"TreeOpen", 0) != 0;
+    s->fmt_bar = get_dword(k, L"FormatBar", s->fmt_bar) != 0;
     s->tree_width = clamp(get_dword(k, L"TreeWidth", s->tree_width), 120, 2000);
     {
         DWORD size = sizeof s->tree_root - sizeof(WCHAR), type = 0;
@@ -114,6 +116,7 @@ void settings_save(const app_settings *s)
     set_dword(k, L"Split", s->split_permille);
     set_dword(k, L"NoInstallPrompt", s->no_install_prompt);
     set_dword(k, L"TreeOpen", s->tree_open);
+    set_dword(k, L"FormatBar", s->fmt_bar);
     set_dword(k, L"TreeWidth", s->tree_width);
     if (s->tree_root[0])
         RegSetValueExW(k, L"TreeRoot", 0, REG_SZ, (const BYTE *)s->tree_root,

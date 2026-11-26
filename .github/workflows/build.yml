@@ -61,13 +61,42 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+      - name: Write the release notes from CHANGELOG.md
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          awk -v v="$ver" '
+            index($0, "## [" v "]") == 1 { on = 1; next }
+            on && /^## \[/ { exit }
+            on && /^\[[^]]*\]: / { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "CHANGELOG.md has no section for $ver" >&2
+            exit 1
+          fi
+          deb="$(cd dist && ls *.deb | head -n 1)"
+          cat >> notes.md <<EOF
+
+          ## How to update
+
+          **Windows:** download \`Domdly.exe\` below and run it. If Domdly is installed, choose *Update the installed copy*: it replaces the version in Program Files and keeps your settings. A portable copy is updated by replacing the file.
+
+          **Linux (Debian and derivatives):** download \`$deb\` below and install it over the old version:
+
+          \`\`\`sh
+          sudo apt install ./$deb
+          \`\`\`
+
+          *Help > Check for Updates on GitHub* tells you when a newer version is out. Full history: [CHANGELOG.md](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/CHANGELOG.md).
+          EOF
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
           gh release create "$GITHUB_REF_NAME" dist/Domdly.exe dist/md2html.exe dist/*.deb
-          --repo "$GITHUB_REPOSITORY" --title "Domdly $GITHUB_REF_NAME" --generate-notes
+          --repo "$GITHUB_REPOSITORY" --title "Domdly $GITHUB_REF_NAME" --notes-file notes.md --latest

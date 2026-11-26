@@ -33,12 +33,12 @@
 
 - **One page, two views.** *Edit* shows the Markdown source, *Read* shows the formatted document. Switch with <kbd>Ctrl</kbd>+<kbd>E</kbd> or the Edit / Read switch in the status bar; the block you were looking at stays in the same place on screen
 - **Edit like a document.** The Read view is a word processor for your Markdown: type into headings, paragraphs, lists, quotes, tables and code blocks without ever seeing a `#` or `**`. Bold text stays bold while you keep typing, a table stays a table. <kbd>Ctrl</kbd>+<kbd>B</kbd>, <kbd>Ctrl</kbd>+<kbd>I</kbd>, the heading and list shortcuts, Enter, Backspace, Tab between table cells, copy, paste and undo work as in a word processor, and a click on a check box ticks it. Domdly writes every change back as clean Markdown and leaves the blocks you did not touch exactly as they were. Pasted text is read as Markdown. Blocks with pictures or HTML open as Markdown source when clicked
-- **Tabs.** Open as many documents as you like, each with its own undo history and position. <kbd>Ctrl</kbd>+<kbd>T</kbd> opens a tab, <kbd>Ctrl</kbd>+<kbd>W</kbd> closes it and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> brings closed tabs back (a file that was moved or deleted in the meantime is skipped), <kbd>Ctrl</kbd>+<kbd>Tab</kbd> moves between them, a middle click closes one. Opening a file from Explorer while Domdly runs adds a tab instead of a second window, and the open tabs come back the next time Domdly starts
+- **Tabs.** Open as many documents as you like, each with its own undo history and position. <kbd>Ctrl</kbd>+<kbd>T</kbd> opens a tab, <kbd>Ctrl</kbd>+<kbd>W</kbd> closes it (on the last, empty tab it closes the window) and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> brings closed tabs back (a file that was moved or deleted in the meantime is skipped), <kbd>Ctrl</kbd>+<kbd>Tab</kbd> moves between them, a middle click closes one. Opening a file from Explorer while Domdly runs adds a tab instead of a second window, and the open tabs come back the next time Domdly starts
 - **Files sidebar.** A slim tree of the folder that holds the open document, on the left. It stays out of the way: closed until you open it with the button next to the menu or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>, and Domdly remembers whether it was open and how wide. One click opens a Markdown file in a tab or a folder in place, other files open with their usual program on a double click. The folder follows the active tab, or click its name to pin any folder. Hidden files stay hidden, and the list refreshes when you come back to the window
 - **Save as Markdown or PDF.** The *Save as* button in the header (or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>) saves the document anywhere as Markdown, or a copy as PDF, HTML or plain text. PDF files are written by the *Microsoft Print to PDF* printer that comes with Windows, pictures included
 - **Three themes in one button.** The button in the bottom-right corner cycles through *Light* (sun), *Dark navy* (half sun, half moon) and *Night* (moon, pure black), or use <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd>. *View > Theme* can also follow the Windows setting
-- **Modern, quiet interface** drawn by Domdly itself: a slim header with the file name, a status bar with line, word count and reading time. Hovering over a button shows its shortcut. On Windows 11 the title bar takes the same colour
-- **Drop a file anywhere** on the window to open it
+- **Modern, quiet interface** drawn by Domdly itself: a slim header with the file name, a status bar with the full path of the file (click it to show the file in its folder), line, word count and reading time. Hovering over a button shows its shortcut. On Windows 11 the title bar takes the same colour
+- **Drop a file anywhere** on the window to open it. **Drop a picture** (PNG, JPEG, GIF, BMP, WebP, SVG) on the document to link it as a Markdown image, `![name](pics/name.png)`: the path is relative to the document once it is saved, and spaces are written as `%20` so the link stays valid Markdown. In the Edit view it goes where it is dropped, in the Read view into a new paragraph below the block under the pointer
 - **HTML inside Markdown is shown too.** Centred logos (`<p align="center">`), `<img width="...">`, `<b>`, `<i>`, `<kbd>`, `<br>`, links, headings, lists, tables and `<details>` look as intended. Scripts and other active content are left out, see [Security](#security)
 - CommonMark style Markdown plus the common GitHub extensions:
   headings, emphasis, strikethrough, inline code, fenced and indented code blocks, block quotes, nested and ordered lists, task lists, tables with column alignment, links, reference links, autolinks, bare URLs, images, entities and HTML (shown safely, see below)
@@ -72,7 +72,7 @@ Domdly does not take over the `.md` file type if another program already owns it
 Download `domdly_<version>_amd64.deb` from the [latest release](https://github.com/dogukansahil/Domdly/releases/latest) and install it:
 
 ```sh
-sudo apt install ./domdly_1.0.0_amd64.deb
+sudo apt install ./domdly_1.1.0_amd64.deb
 ```
 
 Domdly then appears in the applications menu and in *Open With* for Markdown files. `sudo apt remove domdly` removes it. Settings and open tabs are kept in `~/.config/domdly/`.
@@ -114,7 +114,7 @@ Domdly.exe --uninstall [--quiet]  remove an installation
 | Word wrap | <kbd>Alt</kbd>+<kbd>Z</kbd> | Undo / redo | <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> |
 | Cut / copy / paste | <kbd>Ctrl</kbd>+<kbd>X</kbd> / <kbd>C</kbd> / <kbd>V</kbd> | Select all | <kbd>Ctrl</kbd>+<kbd>A</kbd> |
 
-Pressing <kbd>Enter</kbd> inside a list continues it; pressing it again on an empty item ends the list. Formatting commands toggle: applying bold to bold text removes it. In the Read view, formatting commands apply to the block being edited. Hovering over a status bar control shows its shortcut.
+Pressing <kbd>Enter</kbd> inside a list continues it; pressing it again on an empty item ends the list. The formatting toolbar under the tabs runs the same commands with one click (hide it with *Formatting Toolbar* in the View menu). Formatting commands toggle: applying bold to bold text removes it. In the Read view, formatting commands apply to the block being edited. Hovering over a status bar control shows its shortcut.
 
 ## Build from source
 

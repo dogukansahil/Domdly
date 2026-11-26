@@ -32,6 +32,7 @@ typedef struct app_settings {
     int recent_count;
     WCHAR recent[RECENT_MAX][DOMDLY_PATH_MAX];
     int tree_open;       /* the files sidebar is shown */
+    int fmt_bar;         /* the formatting toolbar is shown */
     int tree_width;      /* its width at 96 DPI */
     WCHAR tree_root[DOMDLY_PATH_MAX]; /* pinned folder; empty = follow the open file */
     int session_count;   /* files open in tabs when Domdly last closed */

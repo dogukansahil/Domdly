@@ -35,7 +35,7 @@ typedef struct undo_step {
 } undo_step;
 
 typedef struct doc {
-    GtkWidget *stack, *edit, *read;
+    GtkWidget *page, *fmt, *stack, *edit, *read; /* page = formatting toolbar + stack */
     GtkTextBuffer *ebuf, *rbuf;
     GtkWidget *tab_label, *tab_box;
     char *path;
@@ -52,6 +52,8 @@ typedef struct doc {
 static GtkApplication *g_app;
 static GtkWidget *g_win, *g_header, *g_notebook, *g_status, *g_zoom_label, *g_btn_edit, *g_btn_read, *g_theme_btn;
 static GtkWidget *g_search_bar, *g_search_entry;
+static GtkWidget *g_path_btn, *g_path_label;
+static int g_fmt_bar = 1; /* the formatting toolbar is shown */ /* full path of the open file, left end of the status bar */
 static GtkCssProvider *g_css;
 static int g_view = VIEW_EDIT, g_theme = THEME_SYSTEM, g_zoom = 100, g_switching;
 static char *g_settings_path;
@@ -136,6 +138,7 @@ static void settings_save(void)
     g_key_file_set_integer(k, "view", "theme", g_theme);
     g_key_file_set_integer(k, "view", "zoom", g_zoom);
     g_key_file_set_boolean(k, "view", "tree_open", g_tree_open);
+    g_key_file_set_boolean(k, "view", "format_bar", g_fmt_bar);
     g_key_file_set_integer(k, "view", "tree_width", g_tree_width);
     g_key_file_set_string(k, "view", "tree_root", g_tree_root ? g_tree_root : "");
     int n = gtk_notebook_get_n_pages(GTK_NOTEBOOK(g_notebook));
@@ -177,9 +180,14 @@ static void apply_css(void)
                                 ".domdly-sidehead:hover { background-color: %s; }\n"
                                 "button.domdly-seg:checked { background-image: none; background-color: #2f6feb; "
                                 "color: #ffffff; }\n"
+                                ".domdly-fmt { background-color: %s; border-bottom: 1px solid %s; padding: 3px 28px; }\n"
+                                ".domdly-fmt button { min-height: 0; min-width: 0; padding: 3px 7px; color: %s; }\n"
+                                ".domdly-fmt button:hover { color: %s; }\n"
+                                ".domdly-fmt separator { margin: 6px 5px; }\n"
+                                ".domdly-fmt button:disabled { opacity: 0.35; }\n"
                                 "%s",
                                 p->bg, p->fg, 11.0 * g_zoom / 100.0, p->bar, p->rule, p->head_bg, p->bar, p->rule, p->bar,
-                                p->rule, p->fg, p->fg, p->rule,
+                                p->rule, p->fg, p->fg, p->rule, p->bg, p->rule, p->muted, p->fg,
                                 g_theme == THEME_NIGHT ? "window, headerbar, notebook, notebook header, notebook tab "
                                                          "{ background-color: #0a0a0a; background-image: none; color: #d6d6d6; }\n"
                                                        : "");
@@ -627,7 +635,25 @@ static void update_title(doc *d)
         char *wt = g_strdup_printf("%s%s - Domdly", mod ? "● " : "", doc_name(d));
         gtk_window_set_title(GTK_WINDOW(g_win), wt);
         g_free(wt);
+        if (g_path_btn) {
+            gtk_label_set_text(GTK_LABEL(g_path_label), d->path ? d->path : "");
+            gtk_widget_set_visible(g_path_btn, d->path != NULL);
+        }
     }
+}
+
+/* Clicking the path in the status bar opens the folder that holds the file. */
+static void on_path_clicked(GtkButton *b, gpointer data)
+{
+    (void)b;
+    (void)data;
+    doc *d = current_doc();
+    if (!d || !d->path) return;
+    char *dir = g_path_get_dirname(d->path);
+    char *uri = g_filename_to_uri(dir, NULL, NULL);
+    if (uri) gtk_show_uri_on_window(GTK_WINDOW(g_win), uri, GDK_CURRENT_TIME, NULL);
+    g_free(uri);
+    g_free(dir);
 }
 
 /* ---- switching Edit / Read, keeping the block on screen -------------------- */
@@ -643,6 +669,7 @@ static int top_line_of_edit(doc *d)
 
 static void show_view(doc *d, int view)
 {
+    gtk_widget_set_sensitive(d->fmt, view != VIEW_READ);
     if (view == VIEW_READ) {
         int line = top_line_of_edit(d);
         if (d->read_stale) render_read(d);
@@ -875,6 +902,395 @@ static gboolean on_edit_key(GtkWidget *w, GdkEventKey *ev, gpointer data)
 
 static void close_tab(doc *d);
 
+/* ---- formatting the Markdown source ------------------------------------------
+ * The same commands as the Windows version, applied to the Edit view: inline
+ * marks wrap (or unwrap) the selection, line commands toggle a prefix on every
+ * selected line. All of it is one undo step. */
+
+static void fmt_wrap(doc *d, const char *mark, const char *placeholder)
+{
+    GtkTextBuffer *b = d->ebuf;
+    GtkTextIter s, e;
+    int n = (int)strlen(mark);
+    gtk_text_buffer_begin_user_action(b);
+    if (!gtk_text_buffer_get_selection_bounds(b, &s, &e)) {
+        char *t = g_strconcat(mark, placeholder, mark, NULL);
+        int at = gtk_text_iter_get_offset(&s);
+        gtk_text_buffer_insert(b, &s, t, -1);
+        g_free(t);
+        gtk_text_buffer_get_iter_at_offset(b, &s, at + n);
+        gtk_text_buffer_get_iter_at_offset(b, &e, at + n + (int)g_utf8_strlen(placeholder, -1));
+        gtk_text_buffer_select_range(b, &s, &e);
+        gtk_text_buffer_end_user_action(b);
+        return;
+    }
+    int so = gtk_text_iter_get_offset(&s), eo = gtk_text_iter_get_offset(&e);
+    GtkTextIter bs = s, ae = e;
+    gtk_text_iter_backward_chars(&bs, n);
+    gtk_text_iter_forward_chars(&ae, n);
+    char *before = gtk_text_buffer_get_text(b, &bs, &s, FALSE), *after = gtk_text_buffer_get_text(b, &e, &ae, FALSE);
+    char *inner = gtk_text_buffer_get_text(b, &s, &e, FALSE);
+    size_t il = strlen(inner);
+    if (so >= n && !strcmp(before, mark) && !strcmp(after, mark)) { /* marks just outside: remove them */
+        gtk_text_buffer_delete(b, &e, &ae);
+        gtk_text_buffer_get_iter_at_offset(b, &s, so);
+        gtk_text_buffer_get_iter_at_offset(b, &bs, so - n);
+        gtk_text_buffer_delete(b, &bs, &s);
+        so -= n;
+        eo -= n;
+    } else if (il >= 2 * (size_t)n && !strncmp(inner, mark, n) && !strcmp(inner + il - n, mark)) { /* inside */
+        gtk_text_buffer_get_iter_at_offset(b, &ae, eo);
+        gtk_text_buffer_get_iter_at_offset(b, &e, eo - n);
+        gtk_text_buffer_delete(b, &e, &ae);
+        gtk_text_buffer_get_iter_at_offset(b, &s, so);
+        gtk_text_buffer_get_iter_at_offset(b, &bs, so + n);
+        gtk_text_buffer_delete(b, &s, &bs);
+        eo -= 2 * n;
+    } else {
+        gtk_text_buffer_insert(b, &e, mark, -1);
+        gtk_text_buffer_get_iter_at_offset(b, &s, so);
+        gtk_text_buffer_insert(b, &s, mark, -1);
+        so += n;
+        eo += n;
+    }
+    g_free(before);
+    g_free(after);
+    g_free(inner);
+    gtk_text_buffer_get_iter_at_offset(b, &s, so);
+    gtk_text_buffer_get_iter_at_offset(b, &e, eo);
+    gtk_text_buffer_select_range(b, &s, &e);
+    gtk_text_buffer_end_user_action(b);
+}
+
+enum { PFX_HEADING, PFX_QUOTE, PFX_BULLET, PFX_NUMBER, PFX_TASK };
+
+/* Length of the block prefix at the start of line l (after indentation), and
+   which kind it is (-1 for none). */
+static int line_prefix(const char *l, int *kind, int *level)
+{
+    const char *p = l;
+    *kind = -1;
+    *level = 0;
+    while (*p == ' ') p++;
+    const char *q = p;
+    if (*q == '#') {
+        while (*q == '#') q++;
+        if (*q == ' ' && q - p <= 6) {
+            *kind = PFX_HEADING;
+            *level = (int)(q - p);
+            return (int)(q + 1 - l);
+        }
+        return 0;
+    }
+    if (*q == '>' ) {
+        *kind = PFX_QUOTE;
+        return (int)(q + (q[1] == ' ' ? 2 : 1) - l);
+    }
+    if ((*q == '-' || *q == '*' || *q == '+') && q[1] == ' ') {
+        if (q[2] == '[' && (q[3] == ' ' || q[3] == 'x' || q[3] == 'X') && q[4] == ']' && q[5] == ' ') {
+            *kind = PFX_TASK;
+            return (int)(q + 6 - l);
+        }
+        *kind = PFX_BULLET;
+        return (int)(q + 2 - l);
+    }
+    if (g_ascii_isdigit(*q)) {
+        while (g_ascii_isdigit(*q)) q++;
+        if ((*q == '.' || *q == ')') && q[1] == ' ') {
+            *kind = PFX_NUMBER;
+            return (int)(q + 2 - l);
+        }
+    }
+    return 0;
+}
+
+static void fmt_prefix(doc *d, int kind, int level)
+{
+    GtkTextBuffer *b = d->ebuf;
+    GtkTextIter s, e;
+    gtk_text_buffer_get_selection_bounds(b, &s, &e);
+    int first = gtk_text_iter_get_line(&s), last = gtk_text_iter_get_line(&e);
+    if (last > first && gtk_text_iter_starts_line(&e)) last--;
+    /* when every line already has this prefix, the command removes it */
+    int all = 1;
+    for (int i = first; i <= last && all; i++) {
+        GtkTextIter a, z;
+        gtk_text_buffer_get_iter_at_line(b, &a, i);
+        z = a;
+        if (!gtk_text_iter_ends_line(&z)) gtk_text_iter_forward_to_line_end(&z);
+        char *t = gtk_text_buffer_get_text(b, &a, &z, FALSE);
+        int k, lv;
+        line_prefix(t, &k, &lv);
+        if (k != kind || (kind == PFX_HEADING && lv != level)) all = 0;
+        g_free(t);
+    }
+    gtk_text_buffer_begin_user_action(b);
+    for (int i = first, num = 1; i <= last; i++, num++) {
+        GtkTextIter a, z;
+        gtk_text_buffer_get_iter_at_line(b, &a, i);
+        z = a;
+        if (!gtk_text_iter_ends_line(&z)) gtk_text_iter_forward_to_line_end(&z);
+        char *t = gtk_text_buffer_get_text(b, &a, &z, FALSE);
+        int k, lv, len = line_prefix(t, &k, &lv);
+        int indent = 0;
+        while (t[indent] == ' ') indent++;
+        if (k < 0) len = indent;
+        char np[32] = "";
+        if (!all) {
+            switch (kind) {
+            case PFX_HEADING: g_snprintf(np, sizeof np, "%.*s ", level, "######"); break;
+            case PFX_QUOTE: g_strlcpy(np, "> ", sizeof np); break;
+            case PFX_BULLET: g_strlcpy(np, "- ", sizeof np); break;
+            case PFX_NUMBER: g_snprintf(np, sizeof np, "%d. ", num); break;
+            default: g_strlcpy(np, "- [ ] ", sizeof np); break;
+            }
+        }
+        GtkTextIter ps, pe;
+        gtk_text_buffer_get_iter_at_line_offset(b, &ps, i, indent);
+        gtk_text_buffer_get_iter_at_line_index(b, &pe, i, len);
+        gtk_text_buffer_delete(b, &ps, &pe);
+        gtk_text_buffer_insert(b, &ps, np, -1);
+        g_free(t);
+    }
+    gtk_text_buffer_end_user_action(b);
+}
+
+/* Inserts text on lines of its own at the caret (code block, rule) and selects
+   the part between pre and post. */
+static void fmt_block(doc *d, const char *pre, const char *placeholder, const char *post)
+{
+    GtkTextBuffer *b = d->ebuf;
+    GtkTextIter s, e;
+    int had = gtk_text_buffer_get_selection_bounds(b, &s, &e);
+    char *body = had ? gtk_text_buffer_get_text(b, &s, &e, FALSE) : g_strdup(placeholder);
+    gtk_text_buffer_begin_user_action(b);
+    if (had) gtk_text_buffer_delete(b, &s, &e);
+    const char *lead = gtk_text_iter_starts_line(&s) ? "" : "\n";
+    int at = gtk_text_iter_get_offset(&s) + (int)g_utf8_strlen(lead, -1) + (int)g_utf8_strlen(pre, -1);
+    char *t = g_strconcat(lead, pre, body, post, NULL);
+    gtk_text_buffer_insert(b, &s, t, -1);
+    gtk_text_buffer_get_iter_at_offset(b, &s, at);
+    gtk_text_buffer_get_iter_at_offset(b, &e, at + (int)g_utf8_strlen(body, -1));
+    gtk_text_buffer_select_range(b, &s, &e);
+    gtk_text_buffer_end_user_action(b);
+    g_free(t);
+    g_free(body);
+}
+
+static void fmt_link(doc *d)
+{
+    GtkTextBuffer *b = d->ebuf;
+    GtkTextIter s, e;
+    int had = gtk_text_buffer_get_selection_bounds(b, &s, &e);
+    char *label = had ? gtk_text_buffer_get_text(b, &s, &e, FALSE) : g_strdup("link text");
+    gtk_text_buffer_begin_user_action(b);
+    if (had) gtk_text_buffer_delete(b, &s, &e);
+    int at = gtk_text_iter_get_offset(&s), ll = (int)g_utf8_strlen(label, -1);
+    char *t = g_strconcat("[", label, "](https://)", NULL);
+    gtk_text_buffer_insert(b, &s, t, -1);
+    /* with a label, the address is selected for typing; without, the label */
+    int a = had ? at + ll + 3 : at + 1, z = had ? at + ll + 11 : at + 1 + ll;
+    gtk_text_buffer_get_iter_at_offset(b, &s, a);
+    gtk_text_buffer_get_iter_at_offset(b, &e, z);
+    gtk_text_buffer_select_range(b, &s, &e);
+    gtk_text_buffer_end_user_action(b);
+    g_free(t);
+    g_free(label);
+}
+
+/* Runs a formatting command by its action name; returns 0 if it is not one. */
+static int format_command(const char *name)
+{
+    static const char *const names[] = {"bold", "italic", "strike", "code", "link", "h1", "h2", "h3",
+                                        "quote", "bullet", "numbered", "task", "codeblock", "hr"};
+    int id = -1;
+    for (int i = 0; i < (int)G_N_ELEMENTS(names); i++)
+        if (!strcmp(name, names[i])) id = i;
+    if (id < 0) return 0;
+    doc *d = current_doc();
+    if (!d || g_view != VIEW_EDIT) return 1; /* the Read view is not editable on Linux */
+    switch (id) {
+    case 0: fmt_wrap(d, "**", "bold text"); break;
+    case 1: fmt_wrap(d, "*", "italic text"); break;
+    case 2: fmt_wrap(d, "~~", "struck text"); break;
+    case 3: fmt_wrap(d, "`", "code"); break;
+    case 4: fmt_link(d); break;
+    case 5: case 6: case 7: fmt_prefix(d, PFX_HEADING, id - 4); break;
+    case 8: fmt_prefix(d, PFX_QUOTE, 0); break;
+    case 9: fmt_prefix(d, PFX_BULLET, 0); break;
+    case 10: fmt_prefix(d, PFX_NUMBER, 0); break;
+    case 11: fmt_prefix(d, PFX_TASK, 0); break;
+    case 12: fmt_block(d, "```\n", "code", "\n```\n"); break;
+    default: fmt_block(d, "\n---\n", "", "\n"); break;
+    }
+    gtk_widget_grab_focus(d->edit);
+    return 1;
+}
+
+/* Toolbar icons drawn with cairo, so they look the same on every desktop
+   theme and need no icon files. */
+enum { FI_BULLETS = 1, FI_NUMBERS, FI_TASK, FI_QUOTE, FI_LINK, FI_HR };
+
+static void rounded(cairo_t *cr, double x, double y, double w, double h, double r)
+{
+    cairo_new_sub_path(cr);
+    cairo_arc(cr, x + w - r, y + r, r, -G_PI / 2, 0);
+    cairo_arc(cr, x + w - r, y + h - r, r, 0, G_PI / 2);
+    cairo_arc(cr, x + r, y + h - r, r, G_PI / 2, G_PI);
+    cairo_arc(cr, x + r, y + r, r, G_PI, 3 * G_PI / 2);
+    cairo_close_path(cr);
+}
+
+static gboolean fmt_icon_draw(GtkWidget *w, cairo_t *cr, gpointer data)
+{
+    int kind = GPOINTER_TO_INT(data);
+    GdkRGBA c;
+    gtk_style_context_get_color(gtk_widget_get_style_context(gtk_widget_get_parent(w)),
+                                gtk_widget_get_state_flags(gtk_widget_get_parent(w)), &c);
+    gdk_cairo_set_source_rgba(cr, &c);
+    cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+    cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+    cairo_set_line_width(cr, 1.6);
+    switch (kind) {
+    case FI_BULLETS:
+        for (int i = 0; i < 3; i++) {
+            cairo_move_to(cr, 7.5, 4 + i * 5);
+            cairo_line_to(cr, 16.5, 4 + i * 5);
+        }
+        cairo_stroke(cr);
+        for (int i = 0; i < 3; i++) {
+            cairo_new_sub_path(cr);
+            cairo_arc(cr, 3.5, 4 + i * 5, 1.5, 0, 2 * G_PI);
+        }
+        cairo_fill(cr);
+        break;
+    case FI_NUMBERS:
+        cairo_move_to(cr, 8, 5.5);
+        cairo_line_to(cr, 16.5, 5.5);
+        cairo_move_to(cr, 8, 12.5);
+        cairo_line_to(cr, 16.5, 12.5);
+        cairo_stroke(cr);
+        cairo_set_line_width(cr, 1.3);
+        cairo_move_to(cr, 2.2, 3.4); /* 1 */
+        cairo_line_to(cr, 3.8, 2.4);
+        cairo_line_to(cr, 3.8, 8.4);
+        cairo_move_to(cr, 1.8, 10.2); /* 2 */
+        cairo_line_to(cr, 5.2, 10.2);
+        cairo_line_to(cr, 5.2, 12.2);
+        cairo_line_to(cr, 1.8, 15.4);
+        cairo_line_to(cr, 5.4, 15.4);
+        cairo_stroke(cr);
+        break;
+    case FI_TASK:
+        rounded(cr, 2.5, 2.5, 13, 13, 2.5);
+        cairo_move_to(cr, 5.5, 9);
+        cairo_line_to(cr, 8, 11.5);
+        cairo_line_to(cr, 12.5, 6.5);
+        cairo_stroke(cr);
+        break;
+    case FI_QUOTE:
+        cairo_set_line_width(cr, 2.2);
+        cairo_move_to(cr, 2.5, 2.5);
+        cairo_line_to(cr, 2.5, 15.5);
+        cairo_stroke(cr);
+        cairo_set_line_width(cr, 1.6);
+        cairo_move_to(cr, 7, 4);
+        cairo_line_to(cr, 16.5, 4);
+        cairo_move_to(cr, 7, 9);
+        cairo_line_to(cr, 16.5, 9);
+        cairo_move_to(cr, 7, 14);
+        cairo_line_to(cr, 12.5, 14);
+        cairo_stroke(cr);
+        break;
+    case FI_LINK:
+        cairo_translate(cr, 9, 9);
+        cairo_rotate(cr, -G_PI / 4);
+        rounded(cr, -8.4, -3, 9.4, 6, 3);
+        rounded(cr, -1, -3, 9.4, 6, 3);
+        cairo_stroke(cr);
+        break;
+    default: /* FI_HR */
+        cairo_set_line_width(cr, 1.0);
+        cairo_move_to(cr, 4, 3.5);
+        cairo_line_to(cr, 14, 3.5);
+        cairo_move_to(cr, 4, 14.5);
+        cairo_line_to(cr, 14, 14.5);
+        cairo_stroke(cr);
+        cairo_set_line_width(cr, 2.0);
+        cairo_move_to(cr, 1.5, 9);
+        cairo_line_to(cr, 16.5, 9);
+        cairo_stroke(cr);
+        break;
+    }
+    return FALSE;
+}
+
+static GtkWidget *fmt_bar_new(void)
+{
+    static const struct {
+        const char *action, *markup, *tip;
+        int icon;
+    } items[] = {
+        {"bold", "<b>B</b>", "Bold (Ctrl+B)", 0},
+        {"italic", "<i><span font_family=\"serif\">I</span></i>", "Italic (Ctrl+I)", 0},
+        {"strike", "<s>S</s>", "Strikethrough (Ctrl+Shift+X)", 0},
+        {"code", "<tt><b>&lt;/&gt;</b></tt>", "Inline code (Ctrl+`)", 0},
+        {NULL, NULL, NULL, 0},
+        {"h1", "<b>H1</b>", "Heading 1 (Ctrl+1)", 0},
+        {"h2", "<b>H2</b>", "Heading 2 (Ctrl+2)", 0},
+        {"h3", "<b>H3</b>", "Heading 3 (Ctrl+3)", 0},
+        {NULL, NULL, NULL, 0},
+        {"bullet", NULL, "Bulleted list", FI_BULLETS},
+        {"numbered", NULL, "Numbered list", FI_NUMBERS},
+        {"task", NULL, "Task list", FI_TASK},
+        {"quote", NULL, "Quote (Ctrl+Shift+Q)", FI_QUOTE},
+        {NULL, NULL, NULL, 0},
+        {"link", NULL, "Link (Ctrl+K)", FI_LINK},
+        {"codeblock", "<tt><b>{}</b></tt>", "Code block (Ctrl+Shift+`)", 0},
+        {"hr", NULL, "Horizontal rule", FI_HR},
+    };
+    GtkWidget *bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+    gtk_style_context_add_class(gtk_widget_get_style_context(bar), "domdly-fmt");
+    for (int i = 0; i < (int)G_N_ELEMENTS(items); i++) {
+        if (!items[i].action) {
+            gtk_box_pack_start(GTK_BOX(bar), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 0);
+            continue;
+        }
+        GtkWidget *b = gtk_button_new();
+        gtk_button_set_relief(GTK_BUTTON(b), GTK_RELIEF_NONE);
+        gtk_widget_set_focus_on_click(b, FALSE); /* the editor keeps the caret */
+        gtk_widget_set_tooltip_text(b, items[i].tip);
+        char full[32];
+        g_snprintf(full, sizeof full, "app.%s", items[i].action);
+        gtk_actionable_set_action_name(GTK_ACTIONABLE(b), full);
+        GtkWidget *child;
+        if (items[i].icon) {
+            child = gtk_drawing_area_new();
+            gtk_widget_set_size_request(child, 18, 18);
+            g_signal_connect(child, "draw", G_CALLBACK(fmt_icon_draw), GINT_TO_POINTER(items[i].icon));
+        } else {
+            child = gtk_label_new(NULL);
+            gtk_label_set_markup(GTK_LABEL(child), items[i].markup);
+            gtk_widget_set_size_request(child, 18, 18);
+        }
+        gtk_container_add(GTK_CONTAINER(b), child);
+        gtk_box_pack_start(GTK_BOX(bar), b, FALSE, FALSE, 0);
+    }
+    gtk_widget_set_no_show_all(bar, FALSE);
+    return bar;
+}
+
+static void fmt_bar_toggle(void)
+{
+    g_fmt_bar = !g_fmt_bar;
+    int n = gtk_notebook_get_n_pages(GTK_NOTEBOOK(g_notebook));
+    for (int i = 0; i < n; i++) {
+        doc *d = nth_doc(i);
+        if (d) gtk_widget_set_visible(d->fmt, g_fmt_bar);
+    }
+    settings_save();
+}
+
 static void on_tab_close(GtkButton *b, gpointer data)
 {
     (void)b;
@@ -902,10 +1318,43 @@ static GtkWidget *scrolled(GtkWidget *child)
     return s;
 }
 
+static int offers_files(GdkDragContext *ctx)
+{
+    GdkAtom want = gdk_atom_intern_static_string("text/uri-list");
+    for (GList *l = gdk_drag_context_list_targets(ctx); l; l = l->next)
+        if (GDK_POINTER_TO_ATOM(l->data) == want) return 1;
+    return 0;
+}
+
+/* A read-only text view (the Read view) turns every drop down by itself, so
+   files are accepted here before it gets the chance. */
+static gboolean on_drag_motion(GtkWidget *w, GdkDragContext *ctx, gint x, gint y, guint t, gpointer data)
+{
+    (void)w;
+    (void)x;
+    (void)y;
+    (void)data;
+    if (!offers_files(ctx)) return FALSE;
+    gdk_drag_status(ctx, GDK_ACTION_COPY, t);
+    return TRUE;
+}
+
+static gboolean on_drag_drop(GtkWidget *w, GdkDragContext *ctx, gint x, gint y, guint t, gpointer data)
+{
+    (void)x;
+    (void)y;
+    (void)data;
+    if (!offers_files(ctx)) return FALSE;
+    gtk_drag_get_data(w, ctx, gdk_atom_intern_static_string("text/uri-list"), t);
+    return TRUE;
+}
+
 static void accept_files(GtkWidget *w)
 {
     static GtkTargetEntry targets[] = {{(gchar *)"text/uri-list", 0, 0}};
     gtk_drag_dest_set(w, GTK_DEST_DEFAULT_ALL, targets, 1, GDK_ACTION_COPY);
+    g_signal_connect(w, "drag-motion", G_CALLBACK(on_drag_motion), NULL);
+    g_signal_connect(w, "drag-drop", G_CALLBACK(on_drag_drop), NULL);
     g_signal_connect(w, "drag-data-received", G_CALLBACK(on_drop), NULL);
 }
 
@@ -943,7 +1392,11 @@ static doc *new_tab(void)
     gtk_stack_set_transition_duration(GTK_STACK(d->stack), 120);
     gtk_stack_add_named(GTK_STACK(d->stack), scrolled(d->edit), "edit");
     gtk_stack_add_named(GTK_STACK(d->stack), scrolled(d->read), "read");
-    g_object_set_data(G_OBJECT(d->stack), "doc", d);
+    d->page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    d->fmt = fmt_bar_new();
+    gtk_box_pack_start(GTK_BOX(d->page), d->fmt, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(d->page), d->stack, TRUE, TRUE, 0);
+    g_object_set_data(G_OBJECT(d->page), "doc", d);
     accept_files(d->edit);
     accept_files(d->read);
 
@@ -967,9 +1420,10 @@ static doc *new_tab(void)
     gtk_box_pack_start(GTK_BOX(d->tab_box), close, FALSE, FALSE, 0);
     gtk_widget_show_all(d->tab_box);
 
-    gtk_widget_show_all(d->stack);
-    int n = gtk_notebook_append_page(GTK_NOTEBOOK(g_notebook), d->stack, d->tab_box);
-    gtk_notebook_set_tab_reorderable(GTK_NOTEBOOK(g_notebook), d->stack, TRUE);
+    gtk_widget_show_all(d->page);
+    gtk_widget_set_visible(d->fmt, g_fmt_bar);
+    int n = gtk_notebook_append_page(GTK_NOTEBOOK(g_notebook), d->page, d->tab_box);
+    gtk_notebook_set_tab_reorderable(GTK_NOTEBOOK(g_notebook), d->page, TRUE);
     gtk_notebook_set_current_page(GTK_NOTEBOOK(g_notebook), n);
     show_view(d, g_view);
     update_title(d);
@@ -1450,9 +1904,16 @@ static int confirm_close(doc *d)
 
 static void close_tab(doc *d)
 {
-    int page = gtk_notebook_page_num(GTK_NOTEBOOK(g_notebook), d->stack);
+    int page = gtk_notebook_page_num(GTK_NOTEBOOK(g_notebook), d->page);
     if (page < 0) return;
     gtk_notebook_set_current_page(GTK_NOTEBOOK(g_notebook), page);
+    /* Closing the one empty tab that is left closes the window, like a
+       browser: Ctrl+W pressed once more after the last document is gone. */
+    if (gtk_notebook_get_n_pages(GTK_NOTEBOOK(g_notebook)) == 1 && !d->path &&
+        gtk_text_buffer_get_char_count(d->ebuf) == 0 && !gtk_text_buffer_get_modified(d->ebuf)) {
+        gtk_window_close(GTK_WINDOW(g_win));
+        return;
+    }
     if (!confirm_close(d)) return;
     if (d->path || gtk_text_buffer_get_char_count(d->ebuf) > 0) { /* remember it for Ctrl+Shift+T */
         closed_tab *c = g_new0(closed_tab, 1);
@@ -1485,21 +1946,157 @@ static void close_tab(doc *d)
     settings_save();
 }
 
+/* Pictures dropped on the document are linked from it as Markdown images,
+ * ![name](path), instead of being opened. */
+static int is_image_name(const char *name)
+{
+    static const char *const ext[] = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg"};
+    char *low = g_ascii_strdown(name, -1);
+    int hit = 0;
+    for (size_t i = 0; i < G_N_ELEMENTS(ext); i++)
+        if (g_str_has_suffix(low, ext[i])) hit = 1;
+    g_free(low);
+    return hit;
+}
+
+/* file relative to folder dir ("img/a.png", "../pics/a.png"); the full path
+   when the two share nothing but the root. */
+static char *relative_path(const char *dir, const char *file)
+{
+    size_t i = 0, last = 0;
+    while (dir[i] && file[i] && dir[i] == file[i]) {
+        if (dir[i] == '/') last = i + 1;
+        i++;
+    }
+    if (!dir[i] && file[i] == '/') last = i + 1;
+    if (last <= 1) return g_strdup(file);
+    GString *out = g_string_new("");
+    const char *r = last > strlen(dir) ? "" : dir + last;
+    if (*r) {
+        g_string_append(out, "../");
+        for (const char *q = r; *q; q++)
+            if (*q == '/' && q[1]) g_string_append(out, "../");
+    }
+    g_string_append(out, file + last);
+    return g_string_free(out, FALSE);
+}
+
+/* "![name](path)": relative to the document once it is saved, with spaces
+   and brackets percent-encoded so that it stays a valid Markdown link. */
+static void append_image_md(GString *o, const doc *d, const char *file)
+{
+    char *dir = d && d->path ? g_path_get_dirname(d->path) : NULL;
+    char *rel = dir ? relative_path(dir, file) : g_strdup(file);
+    char *name = g_path_get_basename(file);
+    char *dot = strrchr(name, '.');
+    if (dot && dot != name) *dot = 0;
+    g_string_append(o, "![");
+    for (const char *c = name; *c; c++) {
+        if (*c == '[' || *c == ']' || *c == '\\') g_string_append_c(o, '\\');
+        g_string_append_c(o, *c);
+    }
+    g_string_append(o, "](");
+    for (const unsigned char *c = (const unsigned char *)rel; *c; c++) {
+        if (*c == ' ' || *c == '(' || *c == ')' || *c == '<' || *c == '>' || *c == '%') g_string_append_printf(o, "%%%02X", *c);
+        else g_string_append_c(o, (char)*c);
+    }
+    g_string_append_c(o, ')');
+    g_free(name);
+    g_free(rel);
+    g_free(dir);
+}
+
+/* Inserts the links where they were dropped: at that spot of the source in
+   the Edit view, or as a paragraph after the block under the pointer in the
+   Read view. */
+static void insert_images(doc *d, GtkWidget *w, int x, int y, const char *md)
+{
+    GtkTextBuffer *b = d->ebuf;
+    GtkTextIter at;
+    gtk_text_buffer_begin_user_action(b);
+    if (w == d->edit) {
+        int bx, by;
+        gtk_text_view_window_to_buffer_coords(GTK_TEXT_VIEW(d->edit), GTK_TEXT_WINDOW_WIDGET, x, y, &bx, &by);
+        gtk_text_view_get_iter_at_location(GTK_TEXT_VIEW(d->edit), &at, bx, by);
+        gtk_text_buffer_insert(b, &at, md, -1);
+        gtk_text_buffer_place_cursor(b, &at);
+    } else {
+        int next = -1; /* source line of the block after the one under the pointer */
+        if (w == d->read && d->marks->len) {
+            int bx, by;
+            GtkTextIter it;
+            gtk_text_view_window_to_buffer_coords(GTK_TEXT_VIEW(d->read), GTK_TEXT_WINDOW_WIDGET, x, y, &bx, &by);
+            gtk_text_view_get_iter_at_location(GTK_TEXT_VIEW(d->read), &it, bx, by);
+            int off = gtk_text_iter_get_offset(&it), k = -1;
+            for (guint i = 0; i < d->marks->len; i++) {
+                GtkTextIter m;
+                gtk_text_buffer_get_iter_at_mark(d->rbuf, &m, g_ptr_array_index(d->marks, i));
+                if (gtk_text_iter_get_offset(&m) <= off) k = (int)i;
+            }
+            if (k >= 0 && k + 1 < (int)d->mark_lines->len) next = g_array_index(d->mark_lines, int, k + 1);
+        } else if (w != d->read) {
+            gtk_text_buffer_get_iter_at_mark(b, &at, gtk_text_buffer_get_insert(b));
+            next = gtk_text_iter_get_line(&at) + 1; /* window edge: below the caret line */
+        }
+        GString *t = g_string_new("");
+        if (next >= 0 && next < gtk_text_buffer_get_line_count(b)) {
+            gtk_text_buffer_get_iter_at_line(b, &at, next);
+            for (const char *q = md; *q; q++) {
+                g_string_append_c(t, *q);
+                if (*q == '\n') g_string_append_c(t, '\n');
+            }
+            g_string_append(t, "\n\n");
+        } else {
+            gtk_text_buffer_get_end_iter(b, &at);
+            if (!gtk_text_iter_starts_line(&at)) g_string_append_c(t, '\n');
+            if (gtk_text_buffer_get_char_count(b) > 0) g_string_append_c(t, '\n');
+            for (const char *q = md; *q; q++) {
+                g_string_append_c(t, *q);
+                if (*q == '\n') g_string_append_c(t, '\n');
+            }
+            g_string_append_c(t, '\n');
+        }
+        gtk_text_buffer_insert(b, &at, t->str, -1);
+        g_string_free(t, TRUE);
+    }
+    gtk_text_buffer_end_user_action(b);
+    if (g_view == VIEW_READ) {
+        render_read(d);
+        d->read_stale = 0;
+    }
+}
+
 static void on_drop(GtkWidget *w, GdkDragContext *ctx, gint x, gint y, GtkSelectionData *sel, guint info, guint t,
                     gpointer data)
 {
-    (void)w;
-    (void)x;
-    (void)y;
     (void)info;
     (void)data;
+    /* A text view asks for the dropped data a second time on its own; the
+       same drop (same context) is handled once. */
+    static GdkDragContext *last;
+    static guint last_t;
+    if (ctx == last && t == last_t) {
+        g_signal_stop_emission_by_name(w, "drag-data-received");
+        return;
+    }
+    last = ctx;
+    last_t = t;
+    doc *d = current_doc();
+    GString *imgs = g_string_new("");
     char **uris = gtk_selection_data_get_uris(sel);
     for (int i = 0; uris && uris[i]; i++) {
         char *path = g_filename_from_uri(uris[i], NULL, NULL);
-        if (path) open_path(path);
+        if (path && d && is_image_name(path)) {
+            if (imgs->len) g_string_append_c(imgs, '\n');
+            append_image_md(imgs, d, path);
+        } else if (path) {
+            open_path(path);
+        }
         g_free(path);
     }
     g_strfreev(uris);
+    if (imgs->len && d) insert_images(d, w, x, y, imgs->str);
+    g_string_free(imgs, TRUE);
     gtk_drag_finish(ctx, TRUE, FALSE, t);
     g_signal_stop_emission_by_name(w, "drag-data-received");
 }
@@ -2344,6 +2941,9 @@ static void act(GSimpleAction *a, GVariant *p, gpointer data)
             g_free(path);
         }
         g_object_unref(dlg);
+    } else if (format_command(name)) {
+    } else if (!strcmp(name, "fmtbar")) {
+        fmt_bar_toggle();
     } else if (!strcmp(name, "reopen")) {
         reopen_closed();
     } else if (!strcmp(name, "close")) {
@@ -2500,6 +3100,7 @@ static void build_window(GtkApplication *app)
     g_menu_append(s1, "Close Tab", "app.close");
     g_menu_append(s1, "Reopen Closed Tab", "app.reopen");
     g_menu_append(s2, "Files Sidebar", "app.tree");
+    g_menu_append(s2, "Formatting Toolbar", "app.fmtbar");
     g_menu_append(s2, "Switch Edit / Read", "app.toggle");
     g_menu_append(s2, "Find", "app.find");
     g_menu_append(s2, "Next Theme", "app.theme");
@@ -2569,6 +3170,19 @@ static void build_window(GtkApplication *app)
 
     GtkWidget *bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_style_context_add_class(gtk_widget_get_style_context(bar), "domdly-bar");
+    g_path_label = gtk_label_new("");
+    gtk_label_set_xalign(GTK_LABEL(g_path_label), 0);
+    gtk_label_set_ellipsize(GTK_LABEL(g_path_label), PANGO_ELLIPSIZE_MIDDLE);
+    gtk_label_set_max_width_chars(GTK_LABEL(g_path_label), 60);
+    gtk_widget_show(g_path_label);
+    g_path_btn = gtk_button_new();
+    gtk_button_set_relief(GTK_BUTTON(g_path_btn), GTK_RELIEF_NONE);
+    gtk_container_add(GTK_CONTAINER(g_path_btn), g_path_label);
+    gtk_widget_set_tooltip_text(g_path_btn, "Show this file in its folder");
+    gtk_style_context_add_class(gtk_widget_get_style_context(g_path_btn), "dim-label");
+    gtk_widget_set_no_show_all(g_path_btn, TRUE); /* shown only while the tab has a file */
+    g_signal_connect(g_path_btn, "clicked", G_CALLBACK(on_path_clicked), NULL);
+    gtk_box_pack_start(GTK_BOX(bar), g_path_btn, FALSE, TRUE, 0);
     g_status = gtk_label_new("");
     gtk_label_set_xalign(GTK_LABEL(g_status), 0);
     gtk_label_set_ellipsize(GTK_LABEL(g_status), PANGO_ELLIPSIZE_END);
@@ -2633,6 +3247,21 @@ static void on_startup(GApplication *app, gpointer data)
     const char *tree_accels[] = {"<Primary><Shift>b", NULL};
     gtk_application_set_accels_for_action(g_app, "app.tree", tree_accels);
     add_action("theme", "<Primary><Shift>l", NULL);
+    add_action("bold", "<Primary>b", NULL);
+    add_action("italic", "<Primary>i", NULL);
+    add_action("strike", "<Primary><Shift>x", NULL);
+    add_action("code", "<Primary>grave", NULL);
+    add_action("link", "<Primary>k", NULL);
+    add_action("h1", "<Primary>1", NULL);
+    add_action("h2", "<Primary>2", NULL);
+    add_action("h3", "<Primary>3", NULL);
+    add_action("quote", "<Primary><Shift>q", NULL);
+    add_action("bullet", NULL, NULL);
+    add_action("numbered", NULL, NULL);
+    add_action("task", NULL, NULL);
+    add_action("codeblock", "<Primary><Shift>asciitilde", NULL);
+    add_action("hr", NULL, NULL);
+    add_action("fmtbar", NULL, NULL);
     add_action("zoomin", "<Primary>plus", "<Primary>equal");
     add_action("zoomout", "<Primary>minus", NULL);
     add_action("zoomreset", "<Primary>0", NULL);
@@ -2657,6 +3286,8 @@ static void restore_or_blank(void)
         int z = g_key_file_get_integer(k, "view", "zoom", NULL);
         g_zoom = z >= 50 && z <= 300 ? z : 100;
         g_tree_open = g_key_file_get_boolean(k, "view", "tree_open", NULL);
+        if (g_key_file_has_key(k, "view", "format_bar", NULL))
+            g_fmt_bar = g_key_file_get_boolean(k, "view", "format_bar", NULL);
         int tw = g_key_file_get_integer(k, "view", "tree_width", NULL);
         g_tree_width = tw >= TREE_MIN_WIDTH && tw <= 1200 ? tw : 240;
         char *tr = g_key_file_get_string(k, "view", "tree_root", NULL);

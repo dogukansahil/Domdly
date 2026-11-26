@@ -79,6 +79,7 @@
 #define IDM_TREE_FOLLOW     1417
 #define IDM_TREE_REFRESH    1418
 #define IDM_TREE_REVEAL     1419
+#define IDM_TOGGLE_FMTBAR   1420
 
 /* Help */
 #define IDM_SAMPLE          1500

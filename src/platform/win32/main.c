@@ -51,6 +51,7 @@
 #define TIMER_SYNC 4
 #define RENDER_DELAY 220
 #define WM_APP_OPEN    (WM_APP + 1)
+#define WM_APP_IMAGES  (WM_APP + 7) /* lParam: dropped_images *, dropped pictures to link */
 #define WM_APP_TREE    (WM_APP + 2) /* open a file picked in the sidebar */
 #define WM_APP_UPDATE  (WM_APP + 3) /* the update check has an answer */
 
@@ -60,7 +61,9 @@
 #define DWMWA_CAPTION_COLOR_ 35
 #define DWMWA_TEXT_COLOR_    36
 
-enum { HOT_NONE, HOT_MENU, HOT_ZOOM, HOT_EDIT, HOT_READ, HOT_THEME, HOT_SAVE, HOT_NEWTAB, HOT_SIDEBTN, HOT_SIDEHEAD, HOT_SPLIT, HOT_VER };
+enum { HOT_NONE, HOT_MENU, HOT_ZOOM, HOT_EDIT, HOT_READ, HOT_THEME, HOT_SAVE, HOT_NEWTAB, HOT_SIDEBTN, HOT_SIDEHEAD, HOT_SPLIT, HOT_VER, HOT_PATH };
+enum { ICON_MENU, ICON_SUN, ICON_MOON, ICON_HALF, ICON_SAVE, ICON_PLUS, ICON_CLOSE, ICON_SIDEBAR, ICON_SIDEBAR_ON, ICON_CHEVRON,
+       ICON_BULLETS, ICON_NUMBERS, ICON_TASK, ICON_QUOTE, ICON_LINK, ICON_HR };
 
 typedef struct palette {
     COLORREF doc_bg, doc_fg, bar_bg, bar_border, bar_fg, bar_muted, hover, track, pill, pill_border, accent, drop_bg;
@@ -85,6 +88,36 @@ static int g_last_render_width;
 static ITextDocument *g_tom; /* editor's Text Object Model */
 
 static RECT g_rc_side, g_rc_sidehead, g_rc_sidebtn, g_rc_split, g_rc_ver;
+static RECT g_rc_path; /* full path of the open file, left end of the status bar */
+
+/* Formatting toolbar: a slim strip under the tabs. Each button runs the same
+ * command as its menu item and shortcut; id 0 is a gap between groups. */
+enum { FB_ICON, FB_BOLD, FB_ITALIC, FB_STRIKE, FB_MONO, FB_HEAD };
+typedef struct fmt_btn {
+    int id, look, icon;
+    const WCHAR *text, *tip;
+} fmt_btn;
+static const fmt_btn g_fmt[] = {
+    {IDM_BOLD, FB_BOLD, 0, L"B", L"Bold (Ctrl+B)"},
+    {IDM_ITALIC, FB_ITALIC, 0, L"I", L"Italic (Ctrl+I)"},
+    {IDM_STRIKE, FB_STRIKE, 0, L"S", L"Strikethrough (Ctrl+Shift+X)"},
+    {IDM_CODE, FB_MONO, 0, L"</>", L"Inline code (Ctrl+`)"},
+    {0, 0, 0, NULL, NULL},
+    {IDM_H1, FB_HEAD, 0, L"H1", L"Heading 1 (Ctrl+1)"},
+    {IDM_H2, FB_HEAD, 0, L"H2", L"Heading 2 (Ctrl+2)"},
+    {IDM_H3, FB_HEAD, 0, L"H3", L"Heading 3 (Ctrl+3)"},
+    {0, 0, 0, NULL, NULL},
+    {IDM_BULLET, FB_ICON, ICON_BULLETS, NULL, L"Bulleted list (Ctrl+Shift+8)"},
+    {IDM_NUMBERED, FB_ICON, ICON_NUMBERS, NULL, L"Numbered list (Ctrl+Shift+7)"},
+    {IDM_TASK, FB_ICON, ICON_TASK, NULL, L"Task list (Ctrl+Shift+9)"},
+    {IDM_QUOTE, FB_ICON, ICON_QUOTE, NULL, L"Quote (Ctrl+Shift+Q)"},
+    {0, 0, 0, NULL, NULL},
+    {IDM_LINK, FB_ICON, ICON_LINK, NULL, L"Link (Ctrl+K)"},
+    {IDM_CODEBLOCK, FB_MONO, 0, L"{}", L"Code block (Ctrl+Shift+`)"},
+    {IDM_HR, FB_ICON, ICON_HR, NULL, L"Horizontal rule"},
+};
+#define FMT_COUNT ((int)(sizeof g_fmt / sizeof g_fmt[0]))
+static RECT g_rc_fmt, g_rc_fbtn[FMT_COUNT];
 static HWND g_tree;          /* files sidebar (a tree view) */
 static WCHAR g_tree_root[DOMDLY_PATH_MAX]; /* folder the sidebar shows */
 static int g_tree_drag;      /* resizing the sidebar */
@@ -94,6 +127,8 @@ static int g_hot, g_pressed, g_tracking;
 static WCHAR g_status[256];
 
 static HFONT g_font_ui, g_font_bold, g_font_small, g_font_big, g_font_tiny;
+/* letters on the formatting toolbar: bold B, italic I, struck S, code, headings */
+static HFONT g_font_fb, g_font_fi, g_font_fs, g_font_fm, g_font_fh;
 static WCHAR g_ui_family[LF_FACESIZE] = L"Segoe UI";
 static WCHAR g_mono_family[LF_FACESIZE] = L"Consolas";
 static char g_ui_family_a[LF_FACESIZE] = "Segoe UI";
@@ -123,6 +158,7 @@ static int g_ntabs = 1, g_cur;
 static RECT g_rc_tab[MAX_TABS], g_rc_tabx[MAX_TABS], g_rc_newtab;
 #define HOT_TAB 100  /* + tab index */
 #define HOT_TABX 200 /* + tab index: the close button */
+#define HOT_FMT 300  /* + index into g_fmt: the formatting toolbar */
 #define COPYDATA_OPEN 0x444D4430 /* another Domdly process passes a file */
 
 static int tab_new(void);
@@ -401,6 +437,17 @@ static void create_fonts(void)
     g_font_small = make_font(12, FW_NORMAL);
     g_font_big = make_font(22, FW_SEMIBOLD);
     g_font_tiny = make_font(10, FW_NORMAL);
+    HFONT *ff[] = {&g_font_fb, &g_font_fi, &g_font_fs, &g_font_fm, &g_font_fh};
+    for (int i = 0; i < 5; i++)
+        if (*ff[i]) DeleteObject(*ff[i]);
+    g_font_fb = make_font(16, FW_BOLD);
+    g_font_fi = CreateFontW(-S_(16), 0, 0, 0, FW_NORMAL, TRUE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                            CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_ROMAN, L"Georgia");
+    g_font_fs = CreateFontW(-S_(16), 0, 0, 0, FW_NORMAL, FALSE, FALSE, TRUE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                            CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, g_ui_family);
+    g_font_fm = CreateFontW(-S_(13), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                            CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, g_mono_family);
+    g_font_fh = make_font(13, FW_BOLD);
 }
 
 static int system_prefers_dark(void)
@@ -548,7 +595,6 @@ typedef struct ring_t { rrect_t box; float width; } ring_t;
 typedef struct seg_t { float ax, ay, bx, by, r; } seg_t;
 typedef struct icon_t { int kind; float cx, cy, s; } icon_t;
 
-enum { ICON_MENU, ICON_SUN, ICON_MOON, ICON_HALF, ICON_SAVE, ICON_PLUS, ICON_CLOSE, ICON_SIDEBAR, ICON_SIDEBAR_ON, ICON_CHEVRON };
 
 static float sd_rrect(float x, float y, const rrect_t *b)
 {
@@ -578,6 +624,66 @@ static float sdf_ring(float x, float y, const void *c)
     const ring_t *g = (const ring_t *)c;
     float d = sd_rrect(x, y, &g->box) + g->width / 2;
     return fabsf(d) - g->width / 2;
+}
+
+static float dmin(float a, float b) { return a < b ? a : b; }
+
+/* Formatting toolbar icons, drawn from lines and boxes like the others. */
+static float sdf_format_icon(float x, float y, const icon_t *ic)
+{
+    float s = ic->s, cx = ic->cx, cy = ic->cy, w = s * 0.06f, d = 1e9f;
+    switch (ic->kind) {
+    case ICON_BULLETS:
+        for (int i = -1; i <= 1; i++) {
+            float ly = cy + (float)i * s * 0.34f, dx = x - (cx - s * 0.36f), dy = y - ly;
+            seg_t line = {cx - s * 0.08f, ly, cx + s * 0.48f, ly, w};
+            d = dmin(d, dmin(sd_seg(x, y, &line), sqrtf(dx * dx + dy * dy) - s * 0.085f));
+        }
+        return d;
+    case ICON_NUMBERS: {
+        /* two rows, numbered 1 and 2 with strokes large enough to read */
+        float l = cx - s * 0.5f, r = cx - s * 0.24f, h = s * 0.17f, t = s * 0.05f;
+        float y1 = cy - s * 0.25f, y2 = cy + s * 0.25f;
+        seg_t g[] = {
+            {cx - s * 0.04f, y1, cx + s * 0.48f, y1, w}, {cx - s * 0.04f, y2, cx + s * 0.48f, y2, w},
+            {(l + r) / 2 + s * 0.03f, y1 - h, (l + r) / 2 + s * 0.03f, y1 + h, t},
+            {(l + r) / 2 + s * 0.03f, y1 - h, l + s * 0.04f, y1 - h * 0.45f, t},
+            {l, y2 - h, r, y2 - h, t}, {r, y2 - h, r, y2 - h * 0.1f, t},
+            {r, y2 - h * 0.1f, l, y2 + h, t}, {l, y2 + h, r, y2 + h, t},
+        };
+        for (int i = 0; i < (int)(sizeof g / sizeof g[0]); i++) d = dmin(d, sd_seg(x, y, &g[i]));
+        return d;
+    }
+    case ICON_TASK: {
+        ring_t box = {{cx, cy, s * 0.38f, s * 0.38f, s * 0.1f}, w};
+        seg_t a = {cx - s * 0.2f, cy + s * 0.01f, cx - s * 0.05f, cy + s * 0.16f, w};
+        seg_t b = {cx - s * 0.05f, cy + s * 0.16f, cx + s * 0.22f, cy - s * 0.16f, w};
+        return dmin(sdf_ring(x, y, &box), dmin(sd_seg(x, y, &a), sd_seg(x, y, &b)));
+    }
+    case ICON_QUOTE: {
+        seg_t bar = {cx - s * 0.4f, cy - s * 0.38f, cx - s * 0.4f, cy + s * 0.38f, s * 0.075f};
+        d = sd_seg(x, y, &bar);
+        for (int i = -1; i <= 1; i++) {
+            float ly = cy + (float)i * s * 0.3f;
+            seg_t line = {cx - s * 0.14f, ly, cx + (i == 1 ? s * 0.22f : s * 0.46f), ly, w};
+            d = dmin(d, sd_seg(x, y, &line));
+        }
+        return d;
+    }
+    case ICON_LINK: {
+        /* two chain links rising to the right */
+        float k = 0.70710678f, px = (x - cx) * k - (y - cy) * k, py = (x - cx) * k + (y - cy) * k;
+        ring_t a = {{-s * 0.2f, 0, s * 0.3f, s * 0.17f, s * 0.17f}, s * 0.075f};
+        ring_t b = {{s * 0.2f, 0, s * 0.3f, s * 0.17f, s * 0.17f}, s * 0.075f};
+        return dmin(sdf_ring(px, py, &a), sdf_ring(px, py, &b));
+    }
+    default: { /* ICON_HR: a rule between two lines of text */
+        seg_t top = {cx - s * 0.3f, cy - s * 0.34f, cx + s * 0.3f, cy - s * 0.34f, s * 0.04f};
+        seg_t mid = {cx - s * 0.48f, cy, cx + s * 0.48f, cy, s * 0.075f};
+        seg_t bot = {cx - s * 0.3f, cy + s * 0.34f, cx + s * 0.3f, cy + s * 0.34f, s * 0.04f};
+        return dmin(sd_seg(x, y, &mid), dmin(sd_seg(x, y, &top), sd_seg(x, y, &bot)));
+    }
+    }
 }
 
 static float sdf_icon(float x, float y, const void *c)
@@ -677,6 +783,7 @@ static float sdf_icon(float x, float y, const void *c)
         if ((k = sd_seg(x, y, &base)) < d) d = k;
         return d;
     }
+    if (ic->kind >= ICON_BULLETS) return sdf_format_icon(x, y, ic);
     /* moon: a disc with an offset disc cut away */
     float dx = x - cx, dy = y - cy;
     float outer = sqrtf(dx * dx + dy * dy) - s * 0.42f;
@@ -790,7 +897,7 @@ static int tab_modified(int i)
  * so that the active tab stays visible. */
 static void layout_tabs(HDC dc)
 {
-    int x0 = g_rc_sidebtn.right + S_(6), x1 = g_rc_save.left - S_(10) - S_(34);
+    int x0 = g_rc_sidebtn.right + S_(6), x1 = g_rc_save.left - S_(22) - text_width(dc, L"v" DOMDLY_VERSION_WSTR, g_font_tiny) - S_(10);
     int h = S_(30), top = (g_rc_top.bottom - h) / 2;
     int widths[MAX_TABS], total = 0;
     for (int i = 0; i < g_ntabs; i++) {
@@ -873,8 +980,8 @@ static void paint_chrome(HDC dc)
     WCHAR ver[32];
     swprintf(ver, 32, L"v%s", DOMDLY_VERSION_WSTR);
     RECT vr = g_rc_top;
-    vr.right -= S_(16);
-    vr.left = g_rc_save.right + S_(4);
+    vr.right = g_rc_save.left - S_(14);
+    vr.left = vr.right - S_(80);
 
     /* Save as button (Markdown or PDF) */
     if (g_hot == HOT_SAVE || g_pressed == HOT_SAVE) fill_round(dc, &g_rc_save, SF(7), P.hover);
@@ -923,6 +1030,36 @@ static void paint_chrome(HDC dc)
     if (g_hot == HOT_NEWTAB) fill_round(dc, &g_rc_newtab, SF(7), P.hover);
     draw_icon(dc, &g_rc_newtab, ICON_PLUS, SF(14), P.bar_fg);
 
+    /* formatting toolbar */
+    if (!IsRectEmpty(&g_rc_fmt)) {
+        fill_rect(dc, &g_rc_fmt, P.doc_bg);
+        line = g_rc_fmt;
+        line.top = line.bottom - 1;
+        fill_rect(dc, &line, P.bar_border);
+        for (int i = 0; i < FMT_COUNT; i++) {
+            RECT r = g_rc_fbtn[i];
+            if (IsRectEmpty(&r)) continue;
+            if (!g_fmt[i].id) { /* a thin divider between groups */
+                RECT dv = {(r.left + r.right) / 2, r.top + S_(6), (r.left + r.right) / 2 + 1, r.bottom - S_(6)};
+                fill_rect(dc, &dv, P.bar_border);
+                continue;
+            }
+            int hot = g_hot == HOT_FMT + i, down = hot && g_pressed == HOT_FMT + i;
+            if (hot) fill_round(dc, &r, SF(6), down ? P.track : P.hover);
+            COLORREF fg = hot ? P.bar_fg : P.bar_muted;
+            if (g_fmt[i].look == FB_ICON) {
+                draw_icon(dc, &r, g_fmt[i].icon, SF(16), fg);
+            } else {
+                HFONT f = g_fmt[i].look == FB_BOLD     ? g_font_fb
+                          : g_fmt[i].look == FB_ITALIC ? g_font_fi
+                          : g_fmt[i].look == FB_STRIKE ? g_font_fs
+                          : g_fmt[i].look == FB_MONO   ? g_font_fm
+                                                       : g_font_fh;
+                draw_text(dc, g_fmt[i].text, &r, f, fg, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+            }
+        }
+    }
+
     /* status bar */
     fill_rect(dc, &g_rc_bottom, P.bar_bg);
     line = g_rc_bottom;
@@ -950,12 +1087,33 @@ static void paint_chrome(HDC dc)
     if (g_hot == HOT_SIDEHEAD) hint = g_tree_root[0] ? g_tree_root : L"Choose a folder";
     if (g_hot == HOT_VER) hint = L"Open Domdly on GitHub   \x00B7   Help menu: Check for Updates on GitHub";
     if (g_hot == HOT_SPLIT) hint = L"Drag to resize the sidebar";
+    if (g_hot >= HOT_FMT && g_hot < HOT_FMT + FMT_COUNT) hint = g_fmt[g_hot - HOT_FMT].tip;
     if (g_hot == HOT_NEWTAB) hint = L"New tab: Ctrl+T   \x00B7   Next / previous tab: Ctrl+Tab / Ctrl+Shift+Tab";
-    if (g_hot >= HOT_TABX && g_hot < HOT_TABX + g_ntabs) hint = L"Close tab: Ctrl+W (or middle-click the tab)";
+    if (g_hot >= HOT_TABX && g_hot < HOT_TABX + g_ntabs) hint = L"Close tab: Ctrl+W (or middle-click the tab)   \x00B7   Closing the last empty tab closes the window";
     if (g_hot >= HOT_TAB && g_hot < HOT_TAB + g_ntabs) {
         int i = g_hot - HOT_TAB;
         int has = i == g_cur ? g_has_path : g_tabs[i].has_path;
         hint = has ? (i == g_cur ? g_path : g_tabs[i].path) : L"Untitled document (not saved yet)";
+    }
+    /* The full path of the open file comes first; a long one is shortened in
+     * the middle so that the folder and the file name both stay readable.
+     * Clicking it shows the file in Explorer. */
+    SetRectEmpty(&g_rc_path);
+    if (!hint && g_has_path) {
+        int avail = sr.right - sr.left;
+        int pw = text_width(dc, g_path, g_font_ui);
+        if (pw > avail / 2) pw = avail / 2;
+        int cy = (sr.top + sr.bottom) / 2;
+        SetRect(&g_rc_path, sr.left - S_(6), cy - S_(11), sr.left + pw + S_(6), cy + S_(11));
+        if (g_hot == HOT_PATH) fill_round(dc, &g_rc_path, SF(5), P.hover);
+        RECT pr = sr;
+        pr.right = pr.left + pw;
+        draw_text(dc, g_path, &pr, g_font_ui, g_hot == HOT_PATH ? P.bar_fg : P.bar_muted,
+                  DT_SINGLELINE | DT_VCENTER | DT_PATH_ELLIPSIS);
+        sr.left = g_rc_path.right + S_(6);
+        draw_text(dc, L"\x00B7", &sr, g_font_ui, P.bar_muted, DT_SINGLELINE | DT_VCENTER);
+        sr.left += text_width(dc, L"\x00B7", g_font_ui) + S_(10);
+        if (g_hot == HOT_PATH) hint = L"Click to show this file in its folder";
     }
     draw_text(dc, hint ? hint : g_status, &sr, hint ? g_font_bold : g_font_ui, hint ? P.bar_fg : P.bar_muted,
               DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
@@ -1004,6 +1162,10 @@ static int hit_test(int x, int y)
     }
     if (PtInRect(&g_rc_save, pt)) return HOT_SAVE;
     if (PtInRect(&g_rc_ver, pt)) return HOT_VER;
+    if (PtInRect(&g_rc_path, pt)) return HOT_PATH;
+    if (PtInRect(&g_rc_fmt, pt))
+        for (int i = 0; i < FMT_COUNT; i++)
+            if (g_fmt[i].id && PtInRect(&g_rc_fbtn[i], pt)) return HOT_FMT + i;
     if (PtInRect(&g_rc_zoom, pt)) return HOT_ZOOM;
     if (PtInRect(&g_rc_edit, pt)) return HOT_EDIT;
     if (PtInRect(&g_rc_read, pt)) return HOT_READ;
@@ -1015,6 +1177,7 @@ static void invalidate_chrome(void)
 {
     InvalidateRect(g_main, &g_rc_top, FALSE);
     InvalidateRect(g_main, &g_rc_bottom, FALSE);
+    InvalidateRect(g_main, &g_rc_fmt, FALSE);
     if (S.tree_open) InvalidateRect(g_main, &g_rc_side, FALSE);
 }
 
@@ -1046,6 +1209,8 @@ static void update_tooltips(void)
     if (!g_tip) return;
     add_tool(HOT_MENU, &g_rc_menu, L"Menu (Alt or F10)");
     add_tool(HOT_SIDEBTN, &g_rc_sidebtn, L"Files sidebar (Ctrl+Shift+B)");
+    for (int i = 0; i < FMT_COUNT; i++)
+        if (g_fmt[i].id) add_tool(HOT_FMT + i, &g_rc_fbtn[i], g_fmt[i].tip);
     add_tool(HOT_SAVE, &g_rc_save, L"Save a copy as Markdown or PDF (Ctrl+Shift+S)");
     add_tool(HOT_ZOOM, &g_rc_zoom, L"Zoom with Ctrl+Plus / Ctrl+Minus; click to reset (Ctrl+0)");
     add_tool(HOT_EDIT, &g_rc_edit, L"Edit the Markdown source (Ctrl+E)");
@@ -1085,7 +1250,7 @@ static void layout(void)
     SetRect(&g_rc_menu, S_(8), (th - mh) / 2, S_(8) + S_(36), (th - mh) / 2 + mh);
     SetRect(&g_rc_sidebtn, g_rc_menu.right + S_(2), g_rc_menu.top, g_rc_menu.right + S_(2) + S_(34), g_rc_menu.bottom);
     int sv = S_(28);
-    SetRect(&g_rc_save, w - S_(72) - S_(94), (th - sv) / 2, w - S_(72), (th - sv) / 2 + sv);
+    SetRect(&g_rc_save, w - S_(16) - S_(94), (th - sv) / 2, w - S_(16), (th - sv) / 2 + sv);
 
     int by = g_rc_bottom.top + 1;
     int bb = h;
@@ -1101,6 +1266,7 @@ static void layout(void)
     g_rc_read.left = g_rc_edit.right;
     SetRect(&g_rc_zoom, g_rc_seg.left - S_(8) - S_(52), cy, g_rc_seg.left - S_(8), cy + ch);
 
+    int fh = S.fmt_bar ? S_(38) : 0; /* formatting toolbar under the tabs */
     int top = th, height = h - th - bh;
     if (height < 0) height = 0;
 
@@ -1121,13 +1287,29 @@ static void layout(void)
     }
     w -= side_w;
 
+    int max_col = S_(860);
+    int pad = w > max_col + S_(64) ? (w - max_col) / 2 : S_(32);
+    SetRectEmpty(&g_rc_fmt);
+    for (int i = 0; i < FMT_COUNT; i++) SetRectEmpty(&g_rc_fbtn[i]);
+    if (fh && height > fh) {
+        /* the buttons line up with the left edge of the text column */
+        SetRect(&g_rc_fmt, side_w, top, side_w + w, top + fh);
+        int x = side_w + pad - S_(8), bw = S_(32), bh2 = S_(28), by2 = top + (fh - bh2) / 2;
+        for (int i = 0; i < FMT_COUNT; i++) {
+            int cw = g_fmt[i].id ? bw : S_(13);
+            if (x + cw > side_w + w - S_(8)) break; /* a narrow window shows what fits */
+            SetRect(&g_rc_fbtn[i], x, by2, x + cw, by2 + bh2);
+            x += cw + S_(2);
+        }
+        top += fh;
+        height -= fh;
+    }
+
     MoveWindow(g_edit, side_w, top, w, height, !is_read());
     MoveWindow(g_prev, side_w, top, w, height, is_read());
     ShowWindow(is_read() ? g_edit : g_prev, SW_HIDE);
     ShowWindow(is_read() ? g_prev : g_edit, SW_SHOWNA);
 
-    int max_col = S_(860);
-    int pad = w > max_col + S_(64) ? (w - max_col) / 2 : S_(32);
     set_inner_rect(g_edit, pad, S_(24));
     set_inner_rect(g_prev, pad, S_(24));
     if (g_drop) MoveWindow(g_drop, side_w, top, w, height, TRUE);
@@ -3167,6 +3349,14 @@ static void wys_selchange(void)
 {
     if (g_rendering || g_raw_line >= 0) return;
     CHARRANGE cr = get_sel(g_prev);
+    /* Below the last block there is only the thin closing paragraph of the
+       rendered document; a click there (or Ctrl+End) would leave a tiny caret
+       in it, so the caret goes to the end of the last block instead. */
+    LONG la, lb;
+    if (cr.cpMin == cr.cpMax && g_mcount > 0 && blk_range(g_mcount - 1, &la, &lb) && cr.cpMin > lb) {
+        set_sel(g_prev, lb, lb);
+        return;
+    }
     if (g_pend >= 0 && cr.cpMin != g_pend_cp) g_pend = -1;
     if (g_pend == -2 && cr.cpMin != g_pend_cp) g_pend_cp = cr.cpMin; /* empty document: anywhere */
     if (g_wys_dirty >= 0) {
@@ -3815,6 +4005,13 @@ static void tab_close(int i)
 {
     if (i < 0 || i >= g_ntabs) return;
     tab_activate(i);
+    /* Closing the one empty tab that is left closes the window, like a
+       browser: Ctrl+W pressed once more after the last document is gone. */
+    if (g_ntabs == 1 && !g_has_path && g_raw_line < 0 && GetWindowTextLengthW(g_edit) == 0 &&
+        !SendMessageW(g_edit, EM_GETMODIFY, 0, 0)) {
+        PostMessageW(g_main, WM_CLOSE, 0, 0);
+        return;
+    }
     if (!confirm_discard()) return;
     remember_closed();
     if (g_ntabs == 1) {
@@ -3832,6 +4029,15 @@ static void tab_close(int i)
     if (tom) tom->lpVtbl->Release(tom);
     RevokeDragDrop(dead);
     DestroyWindow(dead);
+}
+
+/* Opens Explorer on the folder of the open file with the file selected. */
+static void show_in_folder(void)
+{
+    if (!g_has_path) return;
+    WCHAR args[DOMDLY_PATH_MAX + 16];
+    swprintf(args, DOMDLY_PATH_MAX + 16, L"/select,\"%s\"", g_path);
+    ShellExecuteW(g_main, L"open", L"explorer.exe", args, NULL, SW_SHOWNORMAL);
 }
 
 /* Asks about every unsaved tab; returns 0 when the user cancels. */
@@ -4603,6 +4809,7 @@ static void update_menu(void)
         SetMenuItemInfoW(m, item, FALSE, &mi);
     }
     CheckMenuItem(m, IDM_TOGGLE_TREE, MF_BYCOMMAND | (S.tree_open ? MF_CHECKED : MF_UNCHECKED));
+    CheckMenuItem(m, IDM_TOGGLE_FMTBAR, MF_BYCOMMAND | (S.fmt_bar ? MF_CHECKED : MF_UNCHECKED));
     CheckMenuItem(m, IDM_WORDWRAP, MF_BYCOMMAND | (S.word_wrap ? MF_CHECKED : MF_UNCHECKED));
     EnableMenuItem(m, IDM_UNDO, MF_BYCOMMAND | (SendMessageW(g_edit, EM_CANUNDO, 0, 0) ? MF_ENABLED : MF_GRAYED));
     EnableMenuItem(m, IDM_REDO, MF_BYCOMMAND | (SendMessageW(g_edit, EM_CANREDO, 0, 0) ? MF_ENABLED : MF_GRAYED));
@@ -4765,6 +4972,11 @@ static void on_command(int id)
     case IDM_VIEW_EDITOR: ensure_edit(); break;
     case IDM_VIEW_PREVIEW: switch_to_read(); break;
     case IDM_TOGGLE_TREE: tree_toggle(); break;
+    case IDM_TOGGLE_FMTBAR:
+        S.fmt_bar = !S.fmt_bar;
+        layout();
+        settings_save(&S);
+        break;
     case IDM_TREE_FOLDER: tree_pick_folder(); break;
     case IDM_TREE_FOLLOW:
         S.tree_root[0] = 0;
@@ -4837,6 +5049,135 @@ typedef struct drop_target {
     int accept;
 } drop_target;
 
+/* Pictures dropped on the document are linked from it as Markdown images,
+ * ![name](path), instead of being opened. */
+typedef struct dropped_images {
+    POINT pt;  /* screen point of the drop */
+    char *md;  /* one image per line */
+} dropped_images;
+
+static int is_image_path(const WCHAR *p)
+{
+    static const WCHAR *const ext[] = {L".png", L".jpg", L".jpeg", L".gif", L".bmp", L".webp", L".svg"};
+    const WCHAR *dot = wcsrchr(p, L'.');
+    if (!dot || wcschr(dot, L'\\')) return 0;
+    for (size_t i = 0; i < sizeof ext / sizeof ext[0]; i++)
+        if (_wcsicmp(dot, ext[i]) == 0) return 1;
+    return 0;
+}
+
+/* file relative to folder dir ("img\a.png", "..\pics\a.png"); the full path
+ * when they share no more than the drive. */
+static void relative_path(const WCHAR *dir, const WCHAR *file, WCHAR *out, size_t cap)
+{
+    size_t i = 0, last = 0;
+    while (dir[i] && file[i] && towlower(dir[i]) == towlower(file[i])) {
+        if (dir[i] == '\\') last = i + 1;
+        i++;
+    }
+    if (!dir[i] && file[i] == '\\') last = i + 1;
+    if (last <= 3) {
+        wcsncpy(out, file, cap - 1);
+        out[cap - 1] = 0;
+        return;
+    }
+    out[0] = 0;
+    const WCHAR *r = last > wcslen(dir) ? L"" : dir + last; /* "" when dir holds the file */
+    if (*r) {
+        int ups = 1;
+        for (const WCHAR *q = r; *q; q++)
+            if (*q == '\\' && q[1]) ups++;
+        for (int k = 0; k < ups && wcslen(out) + 4 < cap; k++) wcscat(out, L"..\\");
+    }
+    if (wcslen(out) + wcslen(file + last) < cap) wcscat(out, file + last);
+}
+
+/* "![name](path)" for an image file. The path is relative to the document
+ * when it has been saved, uses forward slashes, and spaces and brackets are
+ * percent-encoded so that it stays a valid Markdown link. */
+static void append_image_md(mdbuf *o, const WCHAR *file)
+{
+    WCHAR rel[DOMDLY_PATH_MAX];
+    if (g_has_path) {
+        WCHAR dir[DOMDLY_PATH_MAX];
+        util_path_dir(g_path, dir, DOMDLY_PATH_MAX);
+        relative_path(dir, file, rel, DOMDLY_PATH_MAX);
+    } else {
+        wcsncpy(rel, file, DOMDLY_PATH_MAX - 1);
+        rel[DOMDLY_PATH_MAX - 1] = 0;
+    }
+    for (WCHAR *q = rel; *q; q++)
+        if (*q == '\\') *q = '/';
+    WCHAR name[DOMDLY_PATH_MAX];
+    wcsncpy(name, util_path_name(file), DOMDLY_PATH_MAX - 1);
+    name[DOMDLY_PATH_MAX - 1] = 0;
+    WCHAR *dot = wcsrchr(name, L'.');
+    if (dot && dot != name) *dot = 0;
+    char *alt = util_wide_to_utf8(name, -1, NULL), *url = util_wide_to_utf8(rel, -1, NULL);
+    mdbuf_puts(o, "![");
+    for (const char *c = alt ? alt : ""; *c; c++) {
+        if (*c == '[' || *c == ']' || *c == '\\') mdbuf_putc(o, '\\');
+        mdbuf_putc(o, *c);
+    }
+    mdbuf_puts(o, "](");
+    for (const unsigned char *c = (const unsigned char *)(url ? url : ""); *c; c++) {
+        if (*c == ' ' || *c == '(' || *c == ')' || *c == '<' || *c == '>' || *c == '%') mdbuf_printf(o, "%%%02X", *c);
+        else mdbuf_putc(o, (char)*c);
+    }
+    mdbuf_putc(o, ')');
+    free(alt);
+    free(url);
+}
+
+static void raw_open(long line, int caret, POINT pt);
+static void wys_render_at(int line, long off);
+static void splice_source(int l1, int l2, const char *utf8);
+static int editor_line_count(void);
+
+/* Inserts the image links where they were dropped: at that spot of the
+ * source in the Edit view, or as a paragraph after the block under the
+ * pointer in the Read view. */
+static void insert_dropped_images(const dropped_images *di)
+{
+    if (!di->md || !*di->md) return;
+    if (!is_read()) {
+        POINT c = di->pt;
+        ScreenToClient(g_edit, &c);
+        POINTL pl = {c.x, c.y};
+        LONG cp = (LONG)SendMessageW(g_edit, EM_CHARFROMPOS, 0, (LPARAM)&pl);
+        WCHAR *w = util_utf8_to_wide(di->md, -1);
+        if (!w) return;
+        for (WCHAR *q = w; *q; q++)
+            if (*q == '\n') *q = '\r';
+        set_sel(g_edit, cp, cp);
+        replace_sel(w);
+        free(w);
+        SetFocus(g_edit);
+        return;
+    }
+    if (g_raw_line >= 0) {
+        POINT none = {0, 0};
+        raw_open(-1, 0, none); /* finish the block that is open as source */
+    }
+    wys_flush();
+    POINT c = di->pt;
+    ScreenToClient(g_prev, &c);
+    POINTL pl = {c.x, c.y};
+    LONG cp = (LONG)SendMessageW(g_prev, EM_CHARFROMPOS, 0, (LPARAM)&pl);
+    int k = g_welcome_shown ? -1 : marker_for_cp(cp);
+    int at = k >= 0 ? g_blk[k].end + 1 : editor_line_count();
+    mdbuf o;
+    mdbuf_init(&o);
+    mdbuf_putc(&o, '\n');
+    for (const char *q = di->md; *q; q++) {
+        mdbuf_putc(&o, *q);
+        if (*q == '\n') mdbuf_putc(&o, '\n'); /* each picture in a paragraph of its own */
+    }
+    splice_source(at, at - 1, o.data ? o.data : "");
+    mdbuf_free(&o);
+    wys_render_at(at + 1, 0);
+}
+
 static int first_dropped_file(IDataObject *data, WCHAR *out, UINT cap)
 {
     FORMATETC fe = {CF_HDROP, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
@@ -4889,7 +5230,7 @@ static HRESULT STDMETHODCALLTYPE dt_drag_enter(IDropTarget *self, IDataObject *d
     drop_target *t = (drop_target *)self;
     WCHAR path[DOMDLY_PATH_MAX];
     t->accept = first_dropped_file(data, path, DOMDLY_PATH_MAX);
-    if (t->accept) {
+    if (t->accept && !is_image_path(path)) { /* pictures are linked where they land: no curtain */
         wcsncpy(g_drop_name, util_path_name(path), DOMDLY_PATH_MAX - 1);
         show_drop(1);
     }
@@ -4924,13 +5265,29 @@ static HRESULT STDMETHODCALLTYPE dt_drop(IDropTarget *self, IDataObject *data, D
         /* Every dropped file opens in its own tab, after the drag source is
          * released so that dialogs cannot block it. */
         UINT n = DragQueryFileW((HDROP)sm.hGlobal, 0xFFFFFFFF, NULL, 0);
+        mdbuf imgs;
+        mdbuf_init(&imgs);
         for (UINT i = 0; i < n && i < MAX_TABS; i++) {
             WCHAR path[DOMDLY_PATH_MAX];
             if (!DragQueryFileW((HDROP)sm.hGlobal, i, path, DOMDLY_PATH_MAX)) continue;
+            if (is_image_path(path)) {
+                if (imgs.len) mdbuf_putc(&imgs, '\n');
+                append_image_md(&imgs, path);
+                continue;
+            }
             WCHAR *copy = _wcsdup(path);
             if (copy) PostMessageW(g_main, WM_APP_OPEN, 0, (LPARAM)copy);
         }
         ReleaseStgMedium(&sm);
+        dropped_images *di = imgs.len ? (dropped_images *)calloc(1, sizeof *di) : NULL;
+        if (di) {
+            di->pt.x = pt.x;
+            di->pt.y = pt.y;
+            di->md = mdbuf_detach(&imgs);
+            PostMessageW(g_main, WM_APP_IMAGES, 0, (LPARAM)di);
+        } else {
+            mdbuf_free(&imgs);
+        }
         *effect = DROPEFFECT_COPY;
     } else {
         *effect = DROPEFFECT_NONE;
@@ -5027,6 +5384,23 @@ static LRESULT CALLBACK edit_proc(HWND h, UINT m, WPARAM w, LPARAM l, UINT_PTR i
     return r;
 }
 
+/* The largest vertical scroll position at which text still fills the view:
+   the end of the document sits one line above the bottom edge. */
+static long scroll_limit(HWND h)
+{
+    GETTEXTLENGTHEX gl = {GTL_NUMCHARS | GTL_PRECISE, 1200};
+    LONG len = (LONG)SendMessageW(h, EM_GETTEXTLENGTHEX, (WPARAM)&gl, 0);
+    POINT pos;
+    SendMessageW(h, EM_GETSCROLLPOS, 0, (LPARAM)&pos);
+    POINTL end = {0, 0};
+    SendMessageW(h, EM_POSFROMCHAR, (WPARAM)&end, len);
+    RECT fr;
+    SendMessageW(h, EM_GETRECT, 0, (LPARAM)&fr);
+    long line = (long)MulDiv(11 * 14, g_dpi, 720) * (S.zoom > 0 ? S.zoom : 100) / 100;
+    long max = pos.y + end.y + line - fr.bottom;
+    return max < 0 ? 0 : max;
+}
+
 /* RichEdit animates every wheel notch over roughly 300 ms, which feels
    sluggish. Domdly scrolls by the same distance at once instead. Ctrl+wheel
    goes through set_zoom so the status bar stays in step. */
@@ -5068,8 +5442,17 @@ static BOOL wheel_scroll(HWND h, WPARAM w)
 
     POINT pos;
     SendMessageW(h, EM_GETSCROLLPOS, 0, (LPARAM)&pos);
-    pos.y -= px;
-    if (pos.y < 0) pos.y = 0;
+    if (px < 0) {
+        /* EM_SETSCROLLPOS happily scrolls past the end of the text into an
+           empty page, so stop once the last line reaches the bottom. */
+        long max = scroll_limit(h);
+        if (pos.y >= max) return TRUE;
+        pos.y -= px;
+        if (pos.y > max) pos.y = max;
+    } else {
+        pos.y -= px;
+        if (pos.y < 0) pos.y = 0;
+    }
     SendMessageW(h, EM_SETSCROLLPOS, 0, (LPARAM)&pos);
     return TRUE;
 }
@@ -6368,8 +6751,15 @@ static LRESULT CALLBACK main_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             case HOT_NEWTAB: on_command(IDM_NEW); break;
             case HOT_SIDEBTN: on_command(IDM_TOGGLE_TREE); break;
             case HOT_VER: on_command(IDM_WEBSITE); break;
+            case HOT_PATH: show_in_folder(); break;
             default:
                 if (pressed >= HOT_TABX && pressed < HOT_TABX + g_ntabs) tab_close(pressed - HOT_TABX);
+                if (pressed >= HOT_FMT && pressed < HOT_FMT + FMT_COUNT) {
+                    /* the command works on the selection in the view being
+                       edited, which keeps the keyboard focus */
+                    on_command(g_fmt[pressed - HOT_FMT].id);
+                    SetFocus(is_read() ? g_prev : g_edit);
+                }
                 break;
             }
         }
@@ -6445,6 +6835,17 @@ static LRESULT CALLBACK main_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_ACTIVATEAPP:
         if (wp) tree_sync(1); /* files may have changed meanwhile */
         break;
+
+    case WM_APP_IMAGES: {
+        dropped_images *di = (dropped_images *)lp;
+        if (di) {
+            SetForegroundWindow(hwnd);
+            insert_dropped_images(di);
+            free(di->md);
+            free(di);
+        }
+        return 0;
+    }
 
     case WM_APP_OPEN: {
         WCHAR *path = (WCHAR *)lp;

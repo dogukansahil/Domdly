@@ -82,6 +82,7 @@ BEGIN
         MENUITEM "&Switch Edit / Read\tCtrl+E",      IDM_TOGGLE_MODE
         MENUITEM SEPARATOR
         MENUITEM "&Files Sidebar\tCtrl+Shift+B",     IDM_TOGGLE_TREE
+        MENUITEM "Formatting &Toolbar",              IDM_TOGGLE_FMTBAR
         MENUITEM "Open F&older in Sidebar...",       IDM_TREE_FOLDER
         MENUITEM SEPARATOR
         POPUP "&Theme"
