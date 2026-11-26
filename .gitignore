@@ -1,0 +1,19 @@
+# Build output
+/build/
+
+# Editors and IDEs
+.vs/
+.vscode/
+*.suo
+*.user
+
+# Compiler and linker by-products outside build/
+*.obj
+*.o
+*.pdb
+*.ilk
+*.exp
+*.lib
+
+# Domdly's temporary save files
+*.domdly-tmp

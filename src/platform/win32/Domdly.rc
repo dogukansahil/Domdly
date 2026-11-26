@@ -1,0 +1,185 @@
+/*
+ * Domdly - a lightweight Markdown reader and editor
+ * Copyright (C) 2026 Dogukan Sahil and Domdly contributors
+ * SPDX-License-Identifier: GPL-3.0-only
+ */
+#include <windows.h>
+#include "resource.h"
+#include "version.h"
+
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+
+IDI_APP     ICON    "Domdly.ico"
+1           24      "Domdly.manifest"
+IDR_LICENSE RCDATA  "..\\..\\..\\LICENSE"
+IDR_SAMPLE  RCDATA  "..\\..\\..\\docs\\sample.md"
+
+IDR_MENU MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "&New Tab\tCtrl+T",                 IDM_NEW
+        MENUITEM "&Open...\tCtrl+O",                 IDM_OPEN
+        POPUP "Open &Recent"
+        BEGIN
+            MENUITEM "(empty)",                      IDM_RECENT_CLEAR, GRAYED
+        END
+        MENUITEM SEPARATOR
+        MENUITEM "&Save\tCtrl+S",                    IDM_SAVE
+        MENUITEM "Save &As (Markdown, PDF, HTML)...\tCtrl+Shift+S", IDM_SAVEAS
+        MENUITEM "Export as &PDF...\tCtrl+Shift+P", IDM_EXPORT_PDF
+        MENUITEM "&Export as HTML...\tCtrl+Shift+E", IDM_EXPORT_HTML
+        MENUITEM SEPARATOR
+        MENUITEM "&Close Tab\tCtrl+W",               IDM_CLOSE_TAB
+        MENUITEM "Reopen Closed &Tab\tCtrl+Shift+T",  IDM_REOPEN_TAB
+        MENUITEM "Next Ta&b\tCtrl+Tab",               IDM_NEXT_TAB
+        MENUITEM "Pre&vious Tab\tCtrl+Shift+Tab",     IDM_PREV_TAB
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit\tAlt+F4",                    IDM_EXIT
+    END
+    POPUP "&Edit"
+    BEGIN
+        MENUITEM "&Undo\tCtrl+Z",                    IDM_UNDO
+        MENUITEM "&Redo\tCtrl+Y",                    IDM_REDO
+        MENUITEM SEPARATOR
+        MENUITEM "Cu&t\tCtrl+X",                     IDM_CUT
+        MENUITEM "&Copy\tCtrl+C",                    IDM_COPY
+        MENUITEM "&Paste\tCtrl+V",                   IDM_PASTE
+        MENUITEM "Copy Document as &HTML",           IDM_COPY_HTML
+        MENUITEM SEPARATOR
+        MENUITEM "Select &All\tCtrl+A",              IDM_SELALL
+        MENUITEM SEPARATOR
+        MENUITEM "&Find...\tCtrl+F",                 IDM_FIND
+        MENUITEM "Find &Next\tF3",                   IDM_FINDNEXT
+        MENUITEM "R&eplace...\tCtrl+H",              IDM_REPLACE
+    END
+    POPUP "F&ormat"
+    BEGIN
+        MENUITEM "&Bold\tCtrl+B",                    IDM_BOLD
+        MENUITEM "&Italic\tCtrl+I",                  IDM_ITALIC
+        MENUITEM "&Strikethrough\tCtrl+Shift+X",     IDM_STRIKE
+        MENUITEM "Inline &Code\tCtrl+`",             IDM_CODE
+        MENUITEM "&Link...\tCtrl+K",                 IDM_LINK
+        MENUITEM "I&mage",                           IDM_IMAGE
+        MENUITEM SEPARATOR
+        MENUITEM "Heading &1\tCtrl+1",               IDM_H1
+        MENUITEM "Heading &2\tCtrl+2",               IDM_H2
+        MENUITEM "Heading &3\tCtrl+3",               IDM_H3
+        MENUITEM SEPARATOR
+        MENUITEM "&Quote\tCtrl+Shift+Q",             IDM_QUOTE
+        MENUITEM "B&ulleted List\tCtrl+Shift+8",     IDM_BULLET
+        MENUITEM "&Numbered List\tCtrl+Shift+7",     IDM_NUMBERED
+        MENUITEM "&Task List\tCtrl+Shift+9",         IDM_TASK
+        MENUITEM SEPARATOR
+        MENUITEM "Code Bloc&k\tCtrl+Shift+`",        IDM_CODEBLOCK
+        MENUITEM "T&able",                           IDM_TABLE
+        MENUITEM "&Horizontal Rule",                 IDM_HR
+    END
+    POPUP "&View"
+    BEGIN
+        MENUITEM "&Edit Markdown",                   IDM_VIEW_EDITOR
+        MENUITEM "&Read",                            IDM_VIEW_PREVIEW
+        MENUITEM "&Switch Edit / Read\tCtrl+E",      IDM_TOGGLE_MODE
+        MENUITEM SEPARATOR
+        MENUITEM "&Files Sidebar\tCtrl+Shift+B",     IDM_TOGGLE_TREE
+        MENUITEM "Open F&older in Sidebar...",       IDM_TREE_FOLDER
+        MENUITEM SEPARATOR
+        POPUP "&Theme"
+        BEGIN
+            MENUITEM "Use &System Setting",          IDM_THEME_SYSTEM
+            MENUITEM "&Light",                       IDM_THEME_LIGHT
+            MENUITEM "&Dark (Navy)",                 IDM_THEME_DARK
+            MENUITEM "&Night (Black)",               IDM_THEME_NIGHT
+            MENUITEM SEPARATOR
+            MENUITEM "Switch Light / Dark\tCtrl+Shift+L", IDM_THEME_TOGGLE
+        END
+        MENUITEM "&Word Wrap\tAlt+Z",                IDM_WORDWRAP
+        MENUITEM SEPARATOR
+        MENUITEM "Zoom &In\tCtrl+Plus",              IDM_ZOOM_IN
+        MENUITEM "Zoom O&ut\tCtrl+Minus",            IDM_ZOOM_OUT
+        MENUITEM "Reset &Zoom\tCtrl+0",              IDM_ZOOM_RESET
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "Markdown &Sample",                 IDM_SAMPLE
+        MENUITEM SEPARATOR
+        MENUITEM "&Install Domdly on This PC...",      IDM_INSTALL
+        MENUITEM "&Uninstall Domdly...",               IDM_UNINSTALL
+        MENUITEM SEPARATOR
+        MENUITEM "&License",                         IDM_LICENSE
+        MENUITEM "Project &Website",                 IDM_WEBSITE
+        MENUITEM "Check for &Updates on GitHub...",  IDM_CHECK_UPDATES
+        MENUITEM "&About Domdly",                      IDM_ABOUT
+    END
+END
+
+IDR_ACCEL ACCELERATORS
+BEGIN
+    "N",        IDM_NEW,          VIRTKEY, CONTROL
+    "T",        IDM_NEW,          VIRTKEY, CONTROL
+    "T",        IDM_REOPEN_TAB,   VIRTKEY, CONTROL, SHIFT
+    "W",        IDM_CLOSE_TAB,    VIRTKEY, CONTROL
+    VK_TAB,     IDM_NEXT_TAB,     VIRTKEY, CONTROL
+    VK_TAB,     IDM_PREV_TAB,     VIRTKEY, CONTROL, SHIFT
+    VK_NEXT,    IDM_NEXT_TAB,     VIRTKEY, CONTROL
+    VK_PRIOR,   IDM_PREV_TAB,     VIRTKEY, CONTROL
+    "O",        IDM_OPEN,         VIRTKEY, CONTROL
+    "S",        IDM_SAVE,         VIRTKEY, CONTROL
+    "S",        IDM_SAVEAS,       VIRTKEY, CONTROL, SHIFT
+    "E",        IDM_EXPORT_HTML,  VIRTKEY, CONTROL, SHIFT
+    "P",        IDM_EXPORT_PDF,   VIRTKEY, CONTROL, SHIFT
+    "F",        IDM_FIND,         VIRTKEY, CONTROL
+    VK_F3,      IDM_FINDNEXT,     VIRTKEY
+    "H",        IDM_REPLACE,      VIRTKEY, CONTROL
+    "B",        IDM_BOLD,         VIRTKEY, CONTROL
+    "B",        IDM_TOGGLE_TREE,  VIRTKEY, CONTROL, SHIFT
+    "I",        IDM_ITALIC,       VIRTKEY, CONTROL
+    "X",        IDM_STRIKE,       VIRTKEY, CONTROL, SHIFT
+    192,        IDM_CODE,         VIRTKEY, CONTROL
+    192,        IDM_CODEBLOCK,    VIRTKEY, CONTROL, SHIFT
+    "K",        IDM_LINK,         VIRTKEY, CONTROL
+    "1",        IDM_H1,           VIRTKEY, CONTROL
+    "2",        IDM_H2,           VIRTKEY, CONTROL
+    "3",        IDM_H3,           VIRTKEY, CONTROL
+    "Q",        IDM_QUOTE,        VIRTKEY, CONTROL, SHIFT
+    "8",        IDM_BULLET,       VIRTKEY, CONTROL, SHIFT
+    "7",        IDM_NUMBERED,     VIRTKEY, CONTROL, SHIFT
+    "9",        IDM_TASK,         VIRTKEY, CONTROL, SHIFT
+    "E",        IDM_TOGGLE_MODE,  VIRTKEY, CONTROL
+    "L",        IDM_THEME_TOGGLE, VIRTKEY, CONTROL, SHIFT
+    "Z",        IDM_WORDWRAP,     VIRTKEY, ALT
+    187,        IDM_ZOOM_IN,      VIRTKEY, CONTROL
+    VK_ADD,     IDM_ZOOM_IN,      VIRTKEY, CONTROL
+    189,        IDM_ZOOM_OUT,     VIRTKEY, CONTROL
+    VK_SUBTRACT, IDM_ZOOM_OUT,    VIRTKEY, CONTROL
+    "0",        IDM_ZOOM_RESET,   VIRTKEY, CONTROL
+END
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION    DOMDLY_VERSION_MAJOR, DOMDLY_VERSION_MINOR, DOMDLY_VERSION_PATCH, 0
+ PRODUCTVERSION DOMDLY_VERSION_MAJOR, DOMDLY_VERSION_MINOR, DOMDLY_VERSION_PATCH, 0
+ FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+ FILEFLAGS      0
+ FILEOS         VOS_NT_WINDOWS32
+ FILETYPE       VFT_APP
+ FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "Domdly contributors"
+            VALUE "FileDescription",  "Domdly Markdown reader and editor"
+            VALUE "FileVersion",      DOMDLY_VERSION_STR
+            VALUE "InternalName",     "Domdly"
+            VALUE "LegalCopyright",   DOMDLY_COPYRIGHT
+            VALUE "OriginalFilename", "Domdly.exe"
+            VALUE "ProductName",      "Domdly"
+            VALUE "ProductVersion",   DOMDLY_VERSION_STR
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

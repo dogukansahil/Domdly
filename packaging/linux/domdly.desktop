@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Domdly
+GenericName=Markdown Editor
+Comment=Read and edit Markdown files
+Exec=domdly %F
+Icon=domdly
+Terminal=false
+Categories=Office;TextEditor;Utility;
+MimeType=text/markdown;text/x-markdown;
+Keywords=markdown;md;editor;notes;
+StartupWMClass=domdly
