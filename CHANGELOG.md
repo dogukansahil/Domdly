@@ -14,6 +14,12 @@ Every change that reaches `main` is listed under *Unreleased* first. A release m
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-27
+
+### Fixed
+
+- Windows: pressing Enter at the end of the last block in the Read view did not move to a new line. The empty paragraph was added, but the caret was pulled back to the end of the block (by the 1.1.0 fix for clicks below the last block), so the next text was appended to the previous line and further presses only piled up invisible empty lines. This also affected ending a list with Enter on an empty last item. The caret now stays in the new paragraph.
+
 ## [1.1.0] - 2026-11-27
 
 ### Added
@@ -66,6 +72,7 @@ First public version.
 - Separate build outputs: `build/windows/` (`build.bat`) and `build/linux/` (`build.sh`).
 - Repository cover image (`docs/images/cover.png`, 1280 x 640) drawn by `tools/mkcover.c`.
 
-[Unreleased]: https://github.com/dogukansahil/Domdly/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/dogukansahil/Domdly/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/dogukansahil/Domdly/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/dogukansahil/Domdly/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/dogukansahil/Domdly/releases/tag/v1.0.0

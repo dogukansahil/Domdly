@@ -1875,6 +1875,7 @@ static int g_pend = -1;      /* block followed by a new, still empty paragraph
                                 (-2: the document is empty, typing starts it) */
 static int g_welcome_off;    /* the user clicked into the welcome page */
 static LONG g_pend_cp = -1;  /* where that paragraph is */
+static int g_making_pend;    /* that paragraph is being inserted right now */
 static int g_force_line = -1;
 static long g_force_off;
 static int g_eat_char;       /* swallow the WM_CHAR that follows a handled key */
@@ -3140,8 +3141,10 @@ static void wys_enter(void)
             LONG pa, pb;
             if (prev >= 0 && pk >= 0 && blk_range(pk, &pa, &pb) && is_textual(pk)) {
                 set_sel(g_prev, pb, pb);
+                g_making_pend = 1;
                 native_replace(L"\r", -1);
                 set_body_format();
+                g_making_pend = 0;
                 g_pend = pk;
                 g_pend_cp = pb + 1;
             }
@@ -3154,8 +3157,10 @@ static void wys_enter(void)
         blk_range(k, &a, &b);
         if (sa >= b) { /* at the end: a new paragraph that exists once something is typed */
             set_sel(g_prev, b, b);
+            g_making_pend = 1; /* behind the last block the caret must not be pulled back */
             native_replace(L"\r", -1);
             set_body_format();
+            g_making_pend = 0;
             g_pend = k;
             g_pend_cp = b + 1;
         } else {
@@ -3353,7 +3358,7 @@ static void wys_selchange(void)
        rendered document; a click there (or Ctrl+End) would leave a tiny caret
        in it, so the caret goes to the end of the last block instead. */
     LONG la, lb;
-    if (cr.cpMin == cr.cpMax && g_mcount > 0 && blk_range(g_mcount - 1, &la, &lb) && cr.cpMin > lb) {
+    int in_pend = g_making_pend || (g_pend != -1 && cr.cpMin == g_pend_cp);    if (!in_pend && cr.cpMin == cr.cpMax && g_mcount > 0 && blk_range(g_mcount - 1, &la, &lb) && cr.cpMin > lb) {
         set_sel(g_prev, lb, lb);
         return;
     }

@@ -11,10 +11,10 @@
 
 #define DOMDLY_VERSION_MAJOR 1
 #define DOMDLY_VERSION_MINOR 1
-#define DOMDLY_VERSION_PATCH 0
+#define DOMDLY_VERSION_PATCH 1
 
-#define DOMDLY_VERSION_STR  "1.1.0"
-#define DOMDLY_VERSION_WSTR L"1.1.0"
+#define DOMDLY_VERSION_STR  "1.1.1"
+#define DOMDLY_VERSION_WSTR L"1.1.1"
 #define DOMDLY_NAME_WSTR    L"Domdly"
 #define DOMDLY_URL_WSTR     L"https://github.com/dogukansahil/Domdly"
 #define DOMDLY_URL_STR      "https://github.com/dogukansahil/Domdly"

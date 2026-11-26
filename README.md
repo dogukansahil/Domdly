@@ -72,7 +72,7 @@ Domdly does not take over the `.md` file type if another program already owns it
 Download `domdly_<version>_amd64.deb` from the [latest release](https://github.com/dogukansahil/Domdly/releases/latest) and install it:
 
 ```sh
-sudo apt install ./domdly_1.1.0_amd64.deb
+sudo apt install ./domdly_1.1.1_amd64.deb
 ```
 
 Domdly then appears in the applications menu and in *Open With* for Markdown files. `sudo apt remove domdly` removes it. Settings and open tabs are kept in `~/.config/domdly/`.
