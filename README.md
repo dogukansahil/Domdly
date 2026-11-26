@@ -8,8 +8,8 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-blue.svg"></a>
-  <a href="https://github.com/dogukansahil/Domdly/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/dogukansahil/Domdly?sort=semver"></a>
-  <a href="https://github.com/dogukansahil/Domdly/actions/workflows/build.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/dogukansahil/Domdly/build.yml?branch=main"></a>
+  <a href="https://github.com/dogukansahil/Domdly/releases/latest"><img alt="Latest release" src="https://img.shields.io/badge/release-v1.1.0-007ec6"></a>
+  <a href="https://github.com/dogukansahil/Domdly/actions/workflows/build.yml"><img alt="Build status" src="https://github.com/dogukansahil/Domdly/actions/workflows/build.yml/badge.svg?branch=main"></a>
   <img alt="Platform: Windows 10 and 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0a7bbb">
   <img alt="Platform: Linux (Debian, GTK 3)" src="https://img.shields.io/badge/Linux-Debian%20%7C%20GTK%203-d70a53">
   <img alt="macOS: planned" src="https://img.shields.io/badge/macOS-planned-lightgrey">
